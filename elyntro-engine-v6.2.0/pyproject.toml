@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elyntro-engine"
+version = "6.2.0"
+description = "Canonical task planning, execution, persistence, and verification engine for Elyntro."
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["elyntro"]

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: elyntro-prototype
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.lock
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.14.2

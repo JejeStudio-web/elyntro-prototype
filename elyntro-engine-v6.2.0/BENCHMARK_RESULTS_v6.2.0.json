@@ -1,0 +1,74 @@
+{
+  "benchmark": "Elyntro deterministic end-to-end task benchmark",
+  "scope": "Local integration benchmark; no external model/provider calls",
+  "cases": 4,
+  "passed": 4,
+  "failed": 0,
+  "pass_rate": 1.0,
+  "mean_latency_ms": 56.694,
+  "results": [
+    {
+      "name": "responsive_html_artifact",
+      "expected_status": "succeeded",
+      "actual_status": "succeeded",
+      "pass": true,
+      "verification_status": "verified",
+      "artifacts": [
+        "step-step-1-research.json",
+        "step-step-2-create.json",
+        "index.html",
+        "step-step-3-verify.json"
+      ],
+      "steps_planned": 3,
+      "elapsed_ms": 64.048
+    },
+    {
+      "name": "sales_data_analysis",
+      "expected_status": "succeeded",
+      "actual_status": "succeeded",
+      "pass": true,
+      "verification_status": "verified",
+      "artifacts": [
+        "step-step-1-research.json",
+        "step-step-2-analyze.json",
+        "sales_analysis.json",
+        "step-step-3-verify.json"
+      ],
+      "steps_planned": 3,
+      "elapsed_ms": 57.826
+    },
+    {
+      "name": "compound_interest_calculation",
+      "expected_status": "succeeded",
+      "actual_status": "succeeded",
+      "pass": true,
+      "verification_status": "verified",
+      "artifacts": [
+        "step-step-1-analyze.json",
+        "compound_interest.json",
+        "step-step-2-verify.json"
+      ],
+      "steps_planned": 2,
+      "elapsed_ms": 50.102
+    },
+    {
+      "name": "reject_unverified_success_claim",
+      "expected_status": "needs_approval",
+      "actual_status": "needs_approval",
+      "pass": true,
+      "verification_status": "inconclusive",
+      "artifacts": [
+        "step-step-1-research.json",
+        "step-step-2-analyze.json",
+        "step-step-3-verify.json"
+      ],
+      "steps_planned": 3,
+      "elapsed_ms": 54.801
+    }
+  ],
+  "limitations": [
+    "Does not measure general intelligence or foundation-model reasoning.",
+    "Does not test external web research, deployment, image/audio/video generation, or computer use.",
+    "Latency is local runtime overhead and is not comparable to hosted inference latency."
+  ]
+}

@@ -1,102 +1,121 @@
-Elyntro v1.2 — Autonomous Intelligence Runtime
+# Elyntro — repository state and verified runtime
 
-1. Objetivo
+This workspace contains the canonical project extracted from archived deployment bundles. The Flask application is in [app.py](app.py), and the canonical task engine is under [elyntro-engine-v6.2.0/elyntro](elyntro-engine-v6.2.0/elyntro). ZIP archives are historical inputs, not runtime dependencies.
 
-Elyntro es un sistema de inteligencia y ejecución de tareas que debe interpretar objetivos, planificar procesos, utilizar herramientas, trabajar con archivos, verificar resultados y recuperarse de errores.
+## Repository inclusion status
 
-No debe limitarse a generar respuestas de texto. Su objetivo es completar trabajos reales mediante un runtime modular, observable y verificable.
+The verified implementation is present and working, but it is still in the working tree rather than in the Git index. The controlled inclusion plan is documented in [docs/REPO_INCLUSION_MANIFEST.md](docs/REPO_INCLUSION_MANIFEST.md). No commit or push is performed automatically; the canonical source is staged only after explicit approval.
 
-2. Arquitectura
+## What is implemented
 
-El sistema se organiza en los siguientes módulos:
+- Flask web app with health and execution routes.
+- `/api/execute` and `/api/agent/execute` send simple chat to the direct provider path and planned work through the canonical `CognitiveLoop` and `TaskExecutor`.
+- Task steps invoke application-registered handlers; tasks, events, step results, and artifacts are persisted in SQLite.
+- `tool_runtime.py` is a separately tested bounded utility, not the public task route or the canonical task executor.
+- Its arithmetic evaluator accepts a restricted expression grammar and does not execute generated Python.
+- Optional Groq provider adapter using environment configuration.
+- Static validation for generated artifact files.
+- SQLite-backed engine/task persistence via the canonical engine package.
 
-1. Cognitive Engine: interpretación de solicitudes, razonamiento, planificación y descomposición de objetivos.
-2. Execution Runtime: ejecución de planes, gestión de estados, dependencias, límites y resultados.
-3. Tool System: herramientas intercambiables para cálculos, archivos, investigación web y otras operaciones.
-4. Model Provider Layer: interfaz independiente del proveedor de modelos, compatible con proveedores configurables.
-5. Persistent Memory: memoria contextual y almacenamiento persistente con SQLite.
-6. Verification Engine: evaluación de resultados mediante criterios explícitos y evidencias.
-7. Recovery System: diagnóstico de errores, reparación de planes y reintentos controlados.
-8. Security Layer: permisos, aislamiento de ejecución, límites de recursos y protección de secretos.
-9. Artifact Manager: creación, almacenamiento y entrega de documentos, código y otros resultados.
-10. Web Interface: conversaciones, historial, cuenta, archivos adjuntos, tareas y resultados.
+## Architecture
 
-3. Ciclo obligatorio de ejecución
+- Web layer: Flask app and static page.
+- Task execution: `CognitiveLoop` plans registered capabilities; `TaskExecutor` validates steps, bounds retries/timeouts, applies approval gates, and records durable events.
+- Cognitive/core engine: `elyntro-engine-v6.2.0/elyntro` package with planner, verifier, memory, task executor, and persistence interfaces.
+- Provider adapter: Groq OpenAI-compatible chat endpoint via `GROQ_API_KEY`, `GROQ_MODEL`, and timeout settings used by the app.
+- Verification: independent validators are registered for task success; the app distinguishes static validation from factual verification.
 
-Toda solicitud que requiera trabajo debe seguir un ciclo común:
+## Runtime flow
 
-1. Interpretar el objetivo y sus restricciones.
-2. Determinar qué información y herramientas son necesarias.
-3. Crear un plan estructurado con pasos y criterios de éxito.
-4. Comprobar permisos y límites de ejecución.
-5. Ejecutar los pasos y registrar sus resultados.
-6. Validar los resultados con comprobaciones adecuadas.
-7. Detectar errores, corregirlos y reintentar cuando sea seguro.
-8. Guardar los resultados y los artefactos.
-9. Informar qué se completó, qué se verificó y qué quedó pendiente.
+1. Simple chat uses the direct provider adapter; task-like requests use `CognitiveLoop`.
+2. The rule-based planner maps the goal to registered handlers and explicit step dependencies.
+3. `TaskExecutor` records attempts, committed results, artifacts, errors, and bounded retries.
+4. Task artifacts are stored in SQLite and exposed through the task/artifact endpoints.
+5. Registered verifiers check concrete properties; a successful structural check is not factual proof or process isolation.
 
-Ningún endpoint debe saltarse este ciclo cuando la solicitud requiera ejecución verificable.
+The built-in research handler uses the configured search provider (Tavily by default; DuckDuckGo is an explicit legacy option), fetches readable public pages, saves retrieved source excerpts, and passes them to Groq for source-grounded synthesis. Search remains best-effort: provider challenges and errors are recorded rather than treated as successful empty searches. If retrieval or Groq synthesis is unavailable, the task keeps its partial events/artifacts and ends failed rather than claiming completion. Source-backed synthesis is not independent fact verification.
 
-4. Correcciones prioritarias
+## Environment variables
 
-* Establecer una única versión canónica del código.
-* Integrar el motor cognitivo con el runtime web mediante interfaces explícitas.
-* Eliminar rutas que respondan directamente y eviten las comprobaciones obligatorias cuando corresponda.
-* Corregir la configuración de despliegue y eliminar dependencias de ZIP con nombres inconsistentes.
-* Mejorar la persistencia SQLite, la gestión de concurrencia y los registros de auditoría.
-* Unificar la configuración de proveedores y gestionar correctamente errores HTTP, cuotas, modelos y tiempos de espera.
-* Separar la evaluación heurística de la verificación factual independiente.
-* Evitar afirmar que una herramienta se ejecutó cuando solo se generó una respuesta textual.
-* Añadir pruebas unitarias, de integración y de extremo a extremo.
-* Documentar qué funciones están implementadas, cuáles están conectadas y cuáles siguen pendientes.
+For live Groq synthesis and Tavily search, configure the credentials and provider explicitly:
 
-5. Multimodalidad y herramientas
+```bash
+GROQ_API_KEY=your_key
+GROQ_MODEL=openai/gpt-oss-20b
+ELYNTRO_SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=your_tavily_key
+PORT=5000
+ELYNTRO_DB_PATH=/var/data/elyntro.db
+```
 
-La arquitectura debe permitir incorporar progresivamente:
+If `GROQ_API_KEY` or `TAVILY_API_KEY` is missing, the app reports the unavailable capability and does not fabricate a model response or search result. `ELYNTRO_SEARCH_PROVIDER` defaults to `tavily`; `duckduckgo` is an explicit legacy option and can return anti-automation challenges. There is no silent provider fallback.
 
-* Lectura y análisis de documentos.
-* Procesamiento de imágenes, audio y vídeo.
-* Generación de imágenes y otros artefactos.
-* Investigación web con fuentes y trazabilidad.
-* Ejecución de código en un entorno aislado.
-* Automatización de aplicaciones y navegador.
-* Herramientas especializadas seleccionadas según la tarea.
+Tavily search uses the documented [`POST /search` API](https://docs.tavily.com/documentation/api-reference/endpoint/search). A configured search can consume provider credits; review the account's current pricing and limits before enabling it. No live Tavily request was made during local tests.
 
-Cada capacidad debe contar con una implementación real, permisos adecuados y pruebas propias. Aceptar un archivo no significa comprender su contenido; disponer de una interfaz no significa que la función esté operativa.
+## SQLite persistence and durable storage
 
-6. Verificación y seguridad
+The app resolves the database path from `ELYNTRO_DB_PATH` and keeps a local fallback at `elyntro.db` in the repository root for development. For Render, attach a persistent disk mounted at `/var/data` and set `ELYNTRO_DB_PATH=/var/data/elyntro.db`. Without that disk, SQLite has no durability guarantee: a redeploy or service replacement/restart can discard the database.
 
-* No utilizar eval ni ejecutar código arbitrario sin aislamiento.
-* No exponer claves API, credenciales ni información sensible en los registros.
-* Aplicar límites de tiempo, memoria, tamaño de archivos y número de pasos.
-* Distinguir entre éxito, fallo, resultado parcial y capacidad no configurada.
-* Contrastar afirmaciones importantes con evidencias cuando la tarea lo requiera.
-* No presentar una puntuación heurística como prueba objetiva de veracidad.
-* Mantener registros auditables de herramientas, decisiones y resultados.
+The current [render.yaml](render.yaml) does not declare a persistent disk and uses the free plan. Unless the Render service is separately configured with an authorized persistent mount and `ELYNTRO_DB_PATH`, SQLite data is stored on ephemeral service storage and may be lost when the instance restarts, is replaced, or is redeployed. This repository change does not add a disk or alter the plan.
 
-7. Despliegue
+Recommended production configuration:
 
-GitHub será la fuente canónica del código. Render alojará el servicio web y utilizará almacenamiento persistente cuando corresponda.
+```bash
+export ELYNTRO_DB_PATH=/var/data/elyntro.db
+mkdir -p /var/data
+```
 
-El despliegue deberá ser reproducible, sin extracciones manuales de paquetes durante la compilación, con dependencias declaradas, configuración mediante variables de entorno y un endpoint de salud.
+Do not point SQLite to `/tmp` in a containerized deployment unless the target is backed by a real persistent volume. `/tmp` is suitable only for ephemeral local experiments; it is not durable across restarts.
 
-8. Criterios de aceptación
+## Run locally
 
-La versión no se considerará terminada hasta comprobar:
+```bash
+python -m pip install -r requirements-dev.lock
+python -m pytest -q
+gunicorn --bind 0.0.0.0:5000 app:app
+```
 
-* Instalación limpia desde el repositorio.
-* Arranque y respuesta correcta del servicio.
-* Persistencia de conversaciones y memoria después de reiniciar.
-* Ejecución correcta de herramientas y registro de sus resultados.
-* Gestión segura de errores y reintentos.
-* Uso real del proveedor configurado.
-* Ausencia de rutas que eviten las verificaciones obligatorias.
-* Pruebas de integración del motor cognitivo con la aplicación web.
-* Pruebas de permisos, límites y rechazo de operaciones inseguras.
-* Funcionamiento de cada función anunciada en la interfaz.
+`requirements.txt` and `requirements-dev.txt` are editable version-range inputs. Use the repository lock files for repeatable production and development installs. The engine is packaged from the local `elyntro-engine-v6.2.0` directory; `PYTHONPATH` is not required.
 
-9. Regla de desarrollo
+## Render deployment
 
-No añadir funciones únicamente para aumentar el número de características declaradas. Priorizar integraciones funcionales, pruebas reproducibles y resultados verificables.
+Use the existing Flask/gunicorn stack. The project is not a custom rewrite of the engine or runtime; it relies on the extracted canonical engine package and app files.
 
-La v1.2 debe construirse sobre el código existente, conservar los módulos útiles y corregir los defectos identificados antes de añadir complejidad innecesaria.
+The current Render blueprint configuration is:
+
+- Build command: `pip install -r requirements.lock`
+- Start command: `gunicorn --bind 0.0.0.0:$PORT app:app`
+- Python version: `3.14.2` (pinned in `render.yaml`; matches the Python 3.14.2 test runtime and the Python 3.14 lock resolution). Render supports released versions; this pin favors matching the tested patch, not using the newest maintenance patch. Revalidate the locks and suite before upgrading it.
+- The blueprint does not declare provider credentials or a persistent disk. Configure credentials as Render secrets, and authorize/configure persistent storage separately if SQLite data must survive service replacement.
+- Do not depend on ZIP extraction during build or startup; the project ships with the canonical engine files already unpacked in the repository.
+- Keep a health endpoint at `/api/health` for basic service availability only; it is not an intelligence or verification guarantee.
+
+## Tests
+
+Verified in this repository with:
+
+```bash
+python -m pip install -r requirements-dev.lock
+python -m pytest -q
+```
+
+Run the commands from the repository root. The test count is intentionally not hard-coded because it changes with the checked-out suite.
+
+## Important limitations
+
+- This app does not claim that model-generated text is factually verified.
+- Artifact verification checks registered concrete properties; it does not prove functional correctness or factual truth.
+- The public research path can use Tavily when explicitly configured, but live retrieval and Groq synthesis were not verified with authorized credentials in this environment.
+- The runtime is not a sandbox: registered Python handlers execute in-process, and a timed-out non-cooperative handler thread cannot be forcibly terminated.
+- Public-page retrieval resolves each HTTP(S) target, rejects non-global addresses, and connects directly to one of the validated socket addresses rather than resolving the hostname again for the connection. HTTPS retains the URL hostname for TLS SNI/certificate verification and the HTTP `Host` header. Each redirect is resolved and validated again before connecting; HTTPS-to-HTTP redirects are rejected. This reduces DNS-rebinding/redirect risk but is not a network sandbox or an absolute SSRF guarantee.
+- If a provider is not configured, the system reports that limitation explicitly.
+
+## Relevant files
+
+- [app.py](app.py)
+- [tool_runtime.py](tool_runtime.py)
+- [requirements.txt](requirements.txt)
+- [render.yaml](render.yaml)
+- [static/index.html](static/index.html)
+- [tests/test_engine_integration.py](tests/test_engine_integration.py)
+- [elyntro-engine-v6.2.0/elyntro](elyntro-engine-v6.2.0/elyntro)
