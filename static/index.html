@@ -1,17 +1,507 @@
 <!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111714"><title>Elyntro · Inteligencia adaptativa</title>
-<style>
-:root{color-scheme:dark;--bg:#101411;--panel:#171d19;--panel2:#1d2520;--line:#303a33;--text:#edf2ed;--muted:#9aa79d;--accent:#b8e0c5;--accent2:#274c38;--danger:#f1b8ae;--radius:18px}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#23362a 0,transparent 55%),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}button,textarea{font:inherit}button{cursor:pointer}.app{min-height:100vh;display:flex;flex-direction:column}.topbar{height:70px;border-bottom:1px solid #273029;background:#101411d9;backdrop-filter:blur(18px);display:flex;align-items:center;justify-content:space-between;padding:0 clamp(18px,4vw,48px);position:sticky;top:0;z-index:5}.brand{display:flex;align-items:center;gap:11px;font-weight:750;letter-spacing:-.5px;font-size:19px}.mark{width:32px;height:32px;border:1px solid #54735d;border-radius:11px;display:grid;place-items:center;color:var(--accent);font-size:17px;background:linear-gradient(145deg,#263d2d,#17231b)}.topright{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:12px}.dot{width:7px;height:7px;border-radius:50%;background:#d4aa69;display:inline-block}.dot.ready{background:#91d8a7}.workspace{width:min(920px,100%);margin:0 auto;padding:clamp(28px,7vh,76px) 20px 26px;flex:1;display:flex;flex-direction:column}.welcome{margin:auto 0 34px;text-align:center}.eyebrow{color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:2.1px;font-weight:750}.welcome h1{font-size:clamp(32px,6vw,53px);line-height:1.06;letter-spacing:-2px;margin:16px 0 14px;font-weight:650}.welcome p{max-width:560px;margin:0 auto;color:var(--muted);font-size:15px;line-height:1.7}.suggestions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:28px 0 0}.suggestion{background:#171e19;border:1px solid var(--line);border-radius:14px;padding:14px;text-align:left;color:#dbe5dc;min-height:84px;transition:.18s}.suggestion:hover{border-color:#65856c;background:#1c2820}.suggestion strong{display:block;font-size:13px;font-weight:650;margin-bottom:6px}.suggestion span{display:block;color:var(--muted);font-size:12px;line-height:1.45}.conversation{display:flex;flex-direction:column;gap:18px;margin:0 0 26px}.message{max-width:100%;border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:17px 18px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.message.user{align-self:flex-end;max-width:min(85%,680px);background:#24372a;border-color:#365640}.message.assistant{align-self:stretch}.message-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px;color:var(--muted);font-size:11px;letter-spacing:.5px;text-transform:uppercase}.message p{margin:0 0 10px}.message p:last-child{margin-bottom:0}.composer-wrap{position:sticky;bottom:0;padding:12px 0 max(12px,env(safe-area-inset-bottom));background:linear-gradient(180deg,transparent,var(--bg) 15%)}.composer{background:#1a211c;border:1px solid #46544a;border-radius:20px;padding:10px;box-shadow:0 12px 40px #0004}.composer:focus-within{border-color:#81ad8d;box-shadow:0 0 0 3px #83b69215,0 12px 40px #0004}.composer textarea{display:block;width:100%;border:0;outline:0;resize:none;min-height:56px;max-height:220px;padding:10px 12px;background:transparent;color:var(--text);line-height:1.55}.composer textarea::placeholder{color:#7e8b80}.composer-bottom{display:flex;align-items:center;justify-content:space-between;padding:4px 4px 2px 10px;gap:12px}.composer-note{font-size:11px;color:var(--muted)}.send{border:0;border-radius:12px;padding:10px 16px;background:var(--accent);color:#17251b;font-size:13px;font-weight:800;display:flex;align-items:center;gap:8px}.send:disabled{opacity:.5;cursor:wait}.send svg{width:15px;height:15px}.footnote{text-align:center;color:#78847b;font-size:11px;line-height:1.6;margin-top:12px}.statusline{font-size:12px;color:var(--muted);padding:0 5px;min-height:18px}.error{border-color:#75483f!important;color:#ffd5cc}.meta{font-size:11px;color:var(--muted);margin-top:12px;border-top:1px solid var(--line);padding-top:10px}.artifact{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px;background:#121814}.artifact-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.artifact button,.artifact a{background:#293c2e;color:var(--accent);border:1px solid #45634b;border-radius:9px;padding:8px 10px;text-decoration:none;font-size:12px}.pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:99px;padding:5px 9px;color:var(--muted);font-size:11px}.detail{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}.detail summary{font-size:12px;color:var(--muted);cursor:pointer}.detail pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:#c5d1c7;max-height:300px;overflow:auto}@media(max-width:650px){.topbar{height:62px;padding:0 16px}.workspace{padding:42px 14px 16px}.welcome{margin-bottom:24px}.welcome h1{letter-spacing:-1.3px}.welcome p{font-size:14px}.suggestions{grid-template-columns:1fr;gap:8px;margin-top:22px}.suggestion{min-height:auto;padding:12px}.suggestion span{display:none}.message{padding:14px}.message.user{max-width:94%}.composer-note{max-width:60%;line-height:1.4}.topright .version{display:none}}
-</style></head><body><div class="app"><header class="topbar"><div class="brand"><div class="mark">e</div><span>elyntro</span></div><div class="topright"><span class="dot" id="health-dot"></span><span id="health-label">Conectando con el motor</span><span class="pill version">v1.1 · Tool runtime & verification</span></div></header>
-<main class="workspace"><section class="welcome" id="welcome"><div class="eyebrow">Un espacio de trabajo adaptativo</div><h1>¿Qué necesitas resolver?</h1><p>Describe tu objetivo con tus propias palabras. Elyntro decide automáticamente si responder o iniciar una tarea, y muestra con claridad qué ha podido comprobar.</p><div class="suggestions"><button class="suggestion" data-prompt="Explícame cómo funciona el aprendizaje adaptativo con un ejemplo sencillo."><strong>Aprender algo</strong><span>Una explicación clara y adaptada a tu nivel.</span></button><button class="suggestion" data-prompt="Analiza esta idea de proyecto: una aplicación que ayude a organizar tareas y aprender mejor. Identifica riesgos y prioridades."><strong>Analizar una idea</strong><span>Evaluación, riesgos y próximos pasos.</span></button><button class="suggestion" data-prompt="Crea una página web de presentación para un proyecto científico, con secciones de objetivo, método y resultados."><strong>Crear un artefacto</strong><span>Generar un primer archivo que puedas descargar.</span></button></div></section><section class="conversation" id="conversation" aria-live="polite"></section><div class="composer-wrap"><form id="composer-form"><div class="composer"><textarea id="prompt" maxlength="10000" rows="2" placeholder="Escribe lo que necesitas…" aria-label="Tu petición" required></textarea><div class="composer-bottom"><span class="composer-note">Una sola entrada · Elyntro decide la ruta</span><button class="send" id="send" type="submit">Enviar <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div></div></form><div class="statusline" id="status" role="status"></div><div class="footnote">Elyntro puede recuperar resultados web cuando están disponibles. Las respuestas y archivos no se consideran verificados solo por haber sido generados.</div></div></main></div>
-<script>
-const $=id=>document.getElementById(id);let busy=false;const conversation=$('conversation');const history=[];
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function addMessage(role,html){const el=document.createElement('article');el.className='message '+role;el.innerHTML=`<div class="message-head"><span>${role==='user'?'Tú':'Elyntro'}</span><span>${role==='user'?'Petición':'Resultado'}</span></div><div class="message-body">${html}</div>`;conversation.appendChild(el);$('welcome').style.display='none';el.scrollIntoView({behavior:'smooth',block:'nearest'});return el}
-function renderArtifacts(task,host){const arts=task.artifacts||[];if(!arts.length)return '';return '<div class="detail"><summary>Archivos generados · '+arts.length+'</summary>'+arts.map((a,i)=>{const val=typeof a.content==='string'?a.content:JSON.stringify(a.content,null,2);return `<div class="artifact"><div class="artifact-head"><div><strong>${esc(a.name)}</strong><div class="meta">${esc(a.media_type||'archivo')}</div></div><button type="button" data-artifact="${i}">Descargar</button></div></div>`}).join('')+'</div>'}
-function attachDownloads(host,task){host.querySelectorAll('[data-artifact]').forEach(b=>b.addEventListener('click',()=>{const a=(task.artifacts||[])[Number(b.dataset.artifact)];if(!a)return;const body=typeof a.content==='string'?a.content:JSON.stringify(a.content,null,2);const blob=new Blob([body],{type:a.media_type||'text/plain'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=a.name||'elyntro-result.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}))}
-function renderSources(sources){if(!Array.isArray(sources)||!sources.length)return '';return '<div class="detail"><summary>Fuentes recuperadas · '+sources.length+'</summary>'+sources.map(s=>`<div class="artifact"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title||s.url)}</a><div class="meta">${esc(s.snippet||'Sin fragmento disponible')}</div></div>`).join('')+'</div>'}
-async function submitPrompt(value){if(busy||!value.trim())return;busy=true;const prompt=value.trim();$('prompt').value='';$('send').disabled=true;$('status').textContent='Interpretando la intención; consultando herramientas si hacen falta…';addMessage('user',esc(prompt));const pending=addMessage('assistant','<span class="pill">Interpretando y ejecutando…</span>');try{const res=await fetch('/api/agent/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({goal:prompt,history:history.slice(-10)})});const data=await res.json();if(!res.ok)throw new Error(data.error||'No se pudo completar la petición.');const body=pending.querySelector('.message-body');let assistantText='';if(data.kind==='answer'){assistantText=data.answer||'';body.innerHTML=`<div style="white-space:pre-wrap">${esc(assistantText)}</div>${renderSources(data.sources)}<div class="meta">Ruta: ${esc(data.route)} · ${esc(data.route_reason||'')}<br>Modelo confirmado por API: ${esc(data.returned_model||'no indicado')}<br>Estado: ${esc(data.verification?.status||'no verificado')} · ID: ${esc(data.response_id||'no disponible')}${data.runtime?`<br>Runtime: ${esc(data.runtime.steps_used)} acciones registradas / ${esc(data.runtime.max_steps)} pasos máximos`:''}${data.events?.length?`<br>Herramientas: ${esc(data.events.map(ev=>ev.tool+': '+ev.status).join(' · '))}`:''}${data.research?`<br>Investigación: ${esc(data.research.retrieval_level||'sin datos')} · páginas leídas: ${esc(data.research.pages_read??0)} · revisión: ${esc(data.research.review?.status||'no disponible')}`:''}${data.research?.review?.unsupported_claims?.length?`<br>Posibles afirmaciones sin respaldo: ${esc(data.research.review.unsupported_claims.join(' · '))}`:''}</div>`;$('status').textContent=data.runtime?.steps_used?'Ciclo de herramientas ejecutado; revisa los eventos y las evidencias.':(data.research?.pages_read?'Respuesta con páginas recuperadas y revisión automática de respaldo; no equivale a verificación independiente.':(data.sources?.length?'Respuesta con resultados web recuperados; respaldo limitado.':'Respuesta recibida; no equivale a verificación factual independiente.'))}else if(data.kind==='artifact'){const a=data.artifact||{};assistantText=`He generado el archivo ${a.name||'resultado'} a partir de tu petición. El contenido existe, pero todavía no se ha ejecutado ni probado.`;body.innerHTML=`<p>${esc(assistantText)}</p><div class="artifact"><div class="artifact-head"><div><strong>${esc(a.name||'resultado.md')}</strong><div class="meta">${esc(a.media_type||'archivo')} · ${esc(data.verification?.status||'sin comprobación')}</div></div><button type="button" id="download-model-artifact">Descargar</button></div></div><details class="detail"><summary>Vista previa del contenido</summary><pre>${esc(a.content||'')}</pre></details><div class="meta">Ruta: ${esc(data.route)} · Modelo confirmado por API: ${esc(data.returned_model||'no indicado')}<br>Comprobaciones estáticas: ${esc((data.verification?.checks||[]).map(c=>c.name+': '+(c.passed?'OK':'FALLO')).join(' · ')||'ninguna')}<br>${esc(data.verification?.reason||'No se ha realizado ejecución funcional.')}</div>`;body.querySelector('#download-model-artifact').addEventListener('click',()=>{const blob=new Blob([a.content||''],{type:a.media_type||'text/plain'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=a.name||'resultado.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)});$('status').textContent='Archivo generado; pendiente de pruebas funcionales.'}else{const t=data.task||{};const state=t.status||'desconocido';const verified=data.verification?.status||'sin informe';assistantText=`Estado de tarea: ${state}. Ruta: ${data.route}. Verificación: ${verified}.`;let content=`<p><strong>Estado de la tarea:</strong> ${esc(state)}</p><p><strong>Ruta:</strong> ${esc(data.route)} · <strong>Plan:</strong> ${esc((data.plan||[]).map(s=>s.handler_key).join(' → ')||'reserva')}</p><p><strong>Verificación:</strong> ${esc(verified)}</p>`;content+=renderArtifacts(t,pending);body.innerHTML=content;attachDownloads(pending,t);$('status').textContent='Tarea procesada. Revisa el estado y los archivos.'}history.push({role:'user',content:prompt},{role:'assistant',content:assistantText||'Se generó un resultado estructurado.'});while(history.length>12)history.shift()}catch(e){pending.classList.add('error');pending.querySelector('.message-body').textContent='No se pudo completar la petición: '+e.message;$('status').textContent='Error de ejecución.'}finally{busy=false;$('send').disabled=false;$('prompt').focus()}}
-$('composer-form').addEventListener('submit',e=>{e.preventDefault();submitPrompt($('prompt').value)});$('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('composer-form').requestSubmit()}});document.querySelectorAll('[data-prompt]').forEach(b=>b.addEventListener('click',()=>submitPrompt(b.dataset.prompt)));
-async function health(){try{const r=await fetch('/api/health');const d=await r.json();const ok=!!d.ok;$('health-dot').classList.toggle('ready',ok);$('health-label').textContent=d.model_provider==='groq_configured'?'Motor disponible · Groq configurado': 'Motor disponible · IA no configurada';}catch(e){$('health-dot').classList.remove('ready');$('health-label').textContent='Motor no disponible'}}health();
-</script></body></html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101421">
+  <title>Elyntro · Espacio de trabajo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101421;
+      --panel: #171d2b;
+      --panel-raised: #1c2434;
+      --line: #30394c;
+      --text: #edf0fb;
+      --muted: #9aa5bb;
+      --accent: #b8c5ff;
+      --accent-strong: #8295f5;
+      --teal: #8dd8ca;
+      --danger: #ffb8b8;
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      background: radial-gradient(ellipse at 60% -20%, #29304b 0, transparent 48%), var(--bg);
+      color: var(--text);
+      font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    a { color: var(--accent); }
+    .shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      padding: 25px 17px;
+      border-right: 1px solid #ffffff12;
+      background: #101421d9;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 0 8px; font-size: 18px; font-weight: 760; letter-spacing: -.5px; }
+    .mark {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid #7482cf;
+      border-radius: 12px;
+      background: linear-gradient(145deg, #3a426a, #20283d);
+      color: #e1e5ff;
+      font-size: 18px;
+    }
+    .new-task {
+      width: 100%;
+      padding: 11px 13px;
+      border: 1px solid #6876c8;
+      border-radius: 12px;
+      background: #333d70;
+      color: #f4f5ff;
+      text-align: left;
+      font-weight: 680;
+    }
+    .side-label { margin: 0 0 9px 10px; color: #7f8ba5; font-size: 10px; font-weight: 750; letter-spacing: 1.5px; text-transform: uppercase; }
+    .nav { display: grid; gap: 5px; }
+    .nav button {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 10px 11px;
+      border: 1px solid transparent;
+      border-radius: 11px;
+      background: transparent;
+      color: #c2cbdd;
+      text-align: left;
+    }
+    .nav button:hover, .nav button.active { border-color: #ffffff10; background: #ffffff0b; color: var(--text); }
+    .nav-icon { width: 18px; color: var(--accent); text-align: center; }
+    .side-note { margin-top: auto; padding: 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); font-size: 12px; }
+    .side-note strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 12px; }
+    .main { min-width: 0; display: flex; flex-direction: column; }
+    .topbar {
+      min-height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px clamp(18px, 4vw, 54px);
+      border-bottom: 1px solid #ffffff12;
+      background: #101421bd;
+      backdrop-filter: blur(16px);
+    }
+    .section-title { color: #dce2f2; font-size: 13px; font-weight: 650; }
+    .connection { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .badge { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 11px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #d3a766; }
+    .dot.online { background: var(--teal); box-shadow: 0 0 10px #8dd8ca77; }
+    .workspace { width: min(1120px, 100%); margin: 0 auto; padding: clamp(24px, 5vh, 58px) clamp(15px, 4vw, 52px) 25px; flex: 1; }
+    .intro { max-width: 760px; margin: 0 auto 30px; text-align: center; }
+    .eyebrow { color: var(--accent); font-size: 10px; font-weight: 760; letter-spacing: 2px; text-transform: uppercase; }
+    h1 { margin: 12px 0 10px; font-size: clamp(30px, 5vw, 48px); line-height: 1.08; letter-spacing: -1.8px; font-weight: 680; }
+    .intro p { max-width: 630px; margin: 0 auto; color: var(--muted); font-size: 14px; }
+    .suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 22px 0 30px; }
+    .suggestion { min-height: 82px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #171d2bcc; color: var(--text); text-align: left; transition: border-color .15s, transform .15s; }
+    .suggestion:hover { transform: translateY(-2px); border-color: #6574bd; }
+    .suggestion strong { display: block; margin-bottom: 4px; font-size: 13px; }
+    .suggestion span { display: block; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .conversation { display: grid; gap: 16px; width: min(880px, 100%); margin: 0 auto 24px; }
+    .message { min-width: 0; padding: 17px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow-wrap: anywhere; }
+    .message.user { justify-self: end; width: min(82%, 700px); border-color: #424e79; background: #202942; white-space: pre-wrap; }
+    .message.assistant { width: 100%; }
+    .message.error { border-color: #82545d; background: #2a202b; }
+    .message-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--muted); font-size: 10px; font-weight: 740; letter-spacing: 1px; text-transform: uppercase; }
+    .message-body p { margin: 0 0 9px; }
+    .message-body p:last-child { margin-bottom: 0; }
+    .composer-wrap { position: sticky; bottom: 0; width: min(880px, 100%); margin: 0 auto; padding: 12px 0 max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--bg) 17%); }
+    .composer { padding: 10px; border: 1px solid #45506a; border-radius: 18px; background: #1a2030; box-shadow: 0 14px 45px #0005; }
+    .composer:focus-within { border-color: #8295f5; box-shadow: 0 0 0 3px #8295f51c, 0 14px 45px #0005; }
+    textarea { display: block; width: 100%; min-height: 58px; max-height: 200px; resize: vertical; padding: 10px 12px; border: 0; outline: 0; background: transparent; color: var(--text); line-height: 1.5; }
+    textarea::placeholder { color: #8390aa; }
+    .composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 3px 3px 1px 10px; }
+    .composer-note { color: var(--muted); font-size: 10px; }
+    .send { display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; border: 0; border-radius: 11px; background: var(--accent); color: #151a2a; font-size: 12px; font-weight: 800; }
+    .send:disabled { cursor: wait; opacity: .55; }
+    .send svg { width: 15px; height: 15px; }
+    .statusline { min-height: 22px; padding: 7px 4px 0; color: var(--muted); font-size: 11px; }
+    .footnote { max-width: 700px; margin: 5px auto 0; color: #7e8aa1; font-size: 10px; text-align: center; }
+    .result-grid { display: grid; gap: 12px; margin-top: 14px; }
+    .result-card { padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: #121827; }
+    .result-card h3 { margin: 0 0 8px; font-size: 12px; }
+    .result-card p, .result-card li { color: #c3ccdd; font-size: 12px; }
+    .result-card ul { margin: 6px 0 0; padding-left: 20px; }
+    .artifact-row, .source-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 10px 0; border-top: 1px solid #ffffff12; }
+    .artifact-row:first-of-type, .source-row:first-of-type { border-top: 0; }
+    .artifact-meta { color: var(--muted); font-size: 10px; }
+    .small-button { flex: 0 0 auto; padding: 7px 9px; border: 1px solid #4f5d8a; border-radius: 9px; background: #283251; color: var(--accent); font-size: 10px; }
+    .source-row { display: block; }
+    .source-row a { font-size: 12px; font-weight: 650; }
+    .source-row p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    details { margin-top: 10px; }
+    summary { color: var(--accent); cursor: pointer; font-size: 11px; }
+    pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #cbd4e6; font-size: 11px; }
+    .status-pill { display: inline-block; padding: 4px 8px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 10px; }
+    .status-pill.success { border-color: #3d745f; color: var(--teal); }
+    .status-pill.failed { border-color: #82545d; color: var(--danger); }
+    .mobile-brand { display: none; }
+
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 205px minmax(0, 1fr); }
+      .sidebar { padding: 20px 12px; }
+      .workspace { padding-right: 22px; padding-left: 22px; }
+    }
+    @media (max-width: 680px) {
+      .shell { display: block; }
+      .sidebar { display: none; }
+      .mobile-brand { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 750; }
+      .mobile-brand .mark { width: 30px; height: 30px; border-radius: 10px; }
+      .topbar { min-height: 62px; padding: 10px 14px; }
+      .section-title { display: none; }
+      .connection { gap: 5px; }
+      .badge { padding: 5px 8px; font-size: 9px; }
+      .workspace { padding: 34px 14px 15px; }
+      .intro { margin-bottom: 22px; }
+      h1 { letter-spacing: -1.1px; }
+      .intro p { font-size: 13px; }
+      .suggestions { grid-template-columns: 1fr; gap: 7px; margin: 18px 0 24px; }
+      .suggestion { min-height: 0; padding: 11px 12px; }
+      .suggestion span { display: none; }
+      .message { padding: 14px; border-radius: 15px; }
+      .message.user { width: min(94%, 700px); }
+      .composer-note { max-width: 60%; line-height: 1.4; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Navegación principal">
+      <div class="brand"><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
+      <button class="new-task" id="new-task" type="button">＋ &nbsp; Nueva tarea</button>
+      <div>
+        <p class="side-label">Espacio de trabajo</p>
+        <nav class="nav">
+          <button class="active" type="button" aria-current="page"><span class="nav-icon">◈</span> Asistente</button>
+          <button type="button" data-prompt="Investiga fuentes sobre "><span class="nav-icon">⌕</span> Investigación</button>
+          <button type="button" data-prompt="Analiza esta idea: "><span class="nav-icon">⌁</span> Análisis</button>
+          <button type="button" data-prompt="Crea un documento sobre "><span class="nav-icon">▧</span> Creación</button>
+        </nav>
+      </div>
+      <div class="side-note"><strong>Estado de las capacidades</strong>La búsqueda externa, Groq y el almacenamiento dependen de la configuración del servidor. La interfaz indicará si están configurados, no si el proveedor acaba de responder.</div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="mobile-brand"><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
+        <div class="section-title">Asistente · Ejecución verificable</div>
+        <div class="connection" aria-live="polite">
+          <span class="badge"><span class="dot" id="health-dot"></span><span id="health-label">Comprobando API…</span></span>
+          <span class="badge" id="model-label">Modelo sin comprobar</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="intro" id="welcome">
+          <div class="eyebrow">Un espacio de trabajo para resolver tareas</div>
+          <h1>¿Qué necesitas resolver?</h1>
+          <p>Describe tu objetivo. Elyntro puede responder, planificar una tarea registrada, buscar fuentes cuando el proveedor esté disponible y mostrar los resultados y límites observados.</p>
+        </section>
+
+        <section class="suggestions" id="suggestions" aria-label="Ejemplos de tareas">
+          <button class="suggestion" data-prompt="Explícame cómo funciona el aprendizaje adaptativo con un ejemplo sencillo."><strong>Aprender algo</strong><span>Una explicación adaptada a tu pregunta.</span></button>
+          <button class="suggestion" data-prompt="Analiza esta idea de proyecto: una aplicación que ayude a organizar tareas y aprender mejor. Identifica riesgos y prioridades."><strong>Analizar una idea</strong><span>Evaluación y límites de la comprobación.</span></button>
+          <button class="suggestion" data-prompt="Crea una página web de presentación para un proyecto científico, con objetivo, método y resultados."><strong>Crear un artefacto</strong><span>Genera un archivo descargable desde la tarea.</span></button>
+        </section>
+
+        <section class="conversation" id="conversation" aria-live="polite" aria-label="Conversación"></section>
+
+        <div class="composer-wrap">
+          <form id="composer-form">
+            <div class="composer">
+              <textarea id="prompt" maxlength="10000" rows="2" placeholder="Escribe lo que necesitas…" aria-label="Tu petición" required></textarea>
+              <div class="composer-bottom">
+                <span class="composer-note">Texto · hasta 10.000 caracteres</span>
+                <button class="send" id="send" type="submit">Ejecutar
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                </button>
+              </div>
+            </div>
+          </form>
+          <div class="statusline" id="status" role="status"></div>
+          <p class="footnote">Una respuesta del modelo o una página encontrada no equivalen por sí solas a una verificación independiente.</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const conversation = $("conversation");
+    const history = [];
+    let busy = false;
+
+    function element(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function addMessage(role, label, text = "") {
+      const article = element("article", `message ${role}`);
+      const head = element("div", "message-head");
+      head.append(element("span", "", role === "user" ? "Tú" : "Elyntro"));
+      head.append(element("span", "", label));
+      const body = element("div", "message-body");
+      if (text) body.textContent = text;
+      article.append(head, body);
+      conversation.append(article);
+      $("welcome").hidden = true;
+      $("suggestions").hidden = true;
+      article.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      return { article, body };
+    }
+
+    function addCard(parent, title) {
+      const card = element("section", "result-card");
+      card.append(element("h3", "", title));
+      parent.append(card);
+      return card;
+    }
+
+    function addSources(parent, sources) {
+      if (!Array.isArray(sources) || !sources.length) return;
+      const card = addCard(parent, `Fuentes recuperadas · ${sources.length}`);
+      for (const source of sources) {
+        if (!source || typeof source.url !== "string") continue;
+        const row = element("div", "source-row");
+        const link = element("a", "", source.title || source.url);
+        link.href = source.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        row.append(link);
+        const excerpt = source.content || source.snippet;
+        if (typeof excerpt === "string" && excerpt) row.append(element("p", "", excerpt));
+        const provider = source.provider ? `Proveedor: ${source.provider}` : "";
+        if (provider) row.append(element("p", "artifact-meta", provider));
+        card.append(row);
+      }
+    }
+
+    function downloadArtifact(artifact) {
+      const content = typeof artifact.content === "string"
+        ? artifact.content
+        : JSON.stringify(artifact.content, null, 2);
+      const blob = new Blob([content ?? ""], { type: artifact.media_type || "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = artifact.name || "resultado.txt";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function addArtifacts(parent, artifacts) {
+      if (!Array.isArray(artifacts) || !artifacts.length) return;
+      const card = addCard(parent, `Artefactos · ${artifacts.length}`);
+      for (const artifact of artifacts) {
+        if (!artifact || typeof artifact !== "object") continue;
+        const row = element("div", "artifact-row");
+        const info = element("div");
+        info.append(element("strong", "", artifact.name || "archivo"));
+        info.append(element("div", "artifact-meta", artifact.media_type || "tipo no indicado"));
+        row.append(info);
+        const button = element("button", "small-button", "Descargar");
+        button.type = "button";
+        button.addEventListener("click", () => downloadArtifact(artifact));
+        row.append(button);
+        card.append(row);
+        if (artifact.content !== undefined) {
+          const details = element("details");
+          details.append(element("summary", "", "Vista previa"));
+          details.append(element("pre", "", typeof artifact.content === "string"
+            ? artifact.content : JSON.stringify(artifact.content, null, 2)));
+          card.append(details);
+        }
+      }
+    }
+
+    function taskSources(task) {
+      const sources = [];
+      for (const artifact of task?.artifacts || []) {
+        if (artifact?.name !== "investigacion_fuentes.json" || !artifact.content) continue;
+        if (Array.isArray(artifact.content.sources)) sources.push(...artifact.content.sources);
+      }
+      return sources;
+    }
+
+    function renderTask(parent, data) {
+      const task = data.task || {};
+      const status = task.status || data.execution_status || "desconocido";
+      const statusPill = element("span", `status-pill ${status === "succeeded" ? "success" : status === "failed" ? "failed" : ""}`, status);
+      const overview = addCard(parent, "Estado de ejecución");
+      overview.append(statusPill);
+      if (task.task_id) overview.append(element("p", "artifact-meta", `Tarea ${task.task_id}`));
+      const steps = Array.isArray(data.plan) ? data.plan : [];
+      if (steps.length) overview.append(element("p", "", `Plan: ${steps.map((step) => step.handler_key || step.name).join(" → ")}`));
+      const runtime = data.runtime;
+      if (runtime) overview.append(element("p", "artifact-meta", `${runtime.steps_completed ?? 0} de ${runtime.steps_planned ?? 0} pasos completados`));
+
+      const events = Array.isArray(data.events) ? data.events : [];
+      if (events.length) {
+        const eventCard = addCard(parent, `Registro de pasos · ${events.length}`);
+        const list = element("ul");
+        for (const event of events) {
+          const type = event.event_type || event.type || "evento";
+          const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+          const label = payload.handler_key || payload.tool || payload.status || "";
+          list.append(element("li", "", [type, label].filter(Boolean).join(" · ")));
+        }
+        eventCard.append(list);
+      }
+      addSources(parent, taskSources(task));
+      addArtifacts(parent, task.artifacts);
+      if (data.verification) {
+        const verification = addCard(parent, "Verificación");
+        verification.append(element("p", "", `Estado: ${data.verification.status || "no indicado"}`));
+        if (data.verification.reason) verification.append(element("p", "artifact-meta", data.verification.reason));
+      }
+    }
+
+    async function responseJson(response) {
+      const body = await response.text();
+      try {
+        return body ? JSON.parse(body) : {};
+      } catch {
+        throw new Error(`El servidor devolvió una respuesta no JSON (HTTP ${response.status}).`);
+      }
+    }
+
+    function renderFailure(parent, data, status) {
+      const detail = data.error_detail || {};
+      parent.textContent = data.error || `La solicitud falló (HTTP ${status}).`;
+      if (detail.code || detail.stage || detail.error_id) {
+        const card = addCard(parent, "Diagnóstico");
+        card.append(element("p", "", `Código: ${detail.code || "no indicado"}`));
+        if (detail.stage) card.append(element("p", "", `Etapa: ${detail.stage}`));
+        if (detail.retryable !== undefined) card.append(element("p", "", `Reintentable: ${detail.retryable ? "sí" : "no"}`));
+        if (detail.error_id) card.append(element("p", "artifact-meta", `Referencia: ${detail.error_id}`));
+      }
+      if (Array.isArray(data.artifacts)) addArtifacts(parent, data.artifacts);
+      if (data.task) {
+        const partial = addCard(parent, "Resultados parciales");
+        addArtifacts(partial, data.task.artifacts);
+      }
+    }
+
+    async function submitPrompt(value) {
+      const prompt = value.trim();
+      if (busy || !prompt) return;
+      busy = true;
+      $("prompt").value = "";
+      $("send").disabled = true;
+      $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
+      addMessage("user", "Petición", prompt);
+      const pending = addMessage("assistant", "En curso", "Esperando respuesta de la API…");
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 120000);
+      try {
+        const response = await fetch("/api/agent/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ goal: prompt, history: history.slice(-10) }),
+          signal: controller.signal,
+        });
+        const data = await responseJson(response);
+        if (!response.ok) {
+          pending.article.classList.add("error");
+          renderFailure(pending.body, data, response.status);
+          $("status").textContent = `La API respondió con error HTTP ${response.status}.`;
+          return;
+        }
+        pending.body.replaceChildren();
+        if (data.kind === "answer") {
+          pending.article.querySelector(".message-head span:last-child").textContent = "Respuesta";
+          pending.body.append(element("p", "", data.answer || ""));
+          addSources(pending.body, data.sources);
+          const meta = addCard(pending.body, "Información de respuesta");
+          meta.append(element("p", "", `Ruta: ${data.route || "no indicada"} · ${data.route_source || "origen no indicado"}`));
+          meta.append(element("p", "", `Modelo devuelto por API: ${data.returned_model || "no indicado"}`));
+          meta.append(element("p", "", `Verificación: ${data.verification?.status || "no aplicable"}`));
+          $("status").textContent = "Respuesta recibida; no equivale a verificación factual independiente.";
+          history.push({ role: "assistant", content: data.answer || "" });
+        } else {
+          pending.article.querySelector(".message-head span:last-child").textContent = "Resultado de tarea";
+          renderTask(pending.body, data);
+          const state = data.task?.status || data.execution_status || "desconocido";
+          $("status").textContent = state === "succeeded"
+            ? "La tarea terminó. Revisa los artefactos y el estado de verificación."
+            : `La tarea terminó con estado: ${state}.`;
+          history.push({ role: "assistant", content: `Estado de tarea: ${state}` });
+        }
+        history.push({ role: "user", content: prompt });
+        while (history.length > 12) history.shift();
+      } catch (error) {
+        pending.article.classList.add("error");
+        pending.body.textContent = error.name === "AbortError"
+          ? "Se agotó el tiempo de espera de la interfaz. La operación del servidor podría haber continuado."
+          : `No se pudo completar la petición: ${error.message}`;
+        $("status").textContent = "Error de comunicación o tiempo de espera.";
+      } finally {
+        window.clearTimeout(timeout);
+        busy = false;
+        $("send").disabled = false;
+        $("prompt").focus();
+      }
+    }
+
+    $("composer-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitPrompt($("prompt").value);
+    });
+    $("prompt").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        $("composer-form").requestSubmit();
+      }
+    });
+    $("new-task").addEventListener("click", () => {
+      conversation.replaceChildren();
+      $("welcome").hidden = false;
+      $("suggestions").hidden = false;
+      $("status").textContent = "";
+      $("prompt").focus();
+    });
+    document.querySelectorAll("[data-prompt]").forEach((button) => {
+      button.addEventListener("click", () => {
+        $("prompt").value = button.dataset.prompt;
+        $("prompt").focus();
+      });
+    });
+
+    async function checkHealth() {
+      const dot = $("health-dot");
+      try {
+        const response = await fetch("/api/health");
+        const data = await responseJson(response);
+        if (!response.ok || !data.ok) throw new Error("API no disponible");
+        dot.classList.add("online");
+        $("health-label").textContent = "API disponible";
+        $("model-label").textContent = data.model_provider === "groq_configured"
+          ? `Groq configurado · ${data.model || "modelo no indicado"}`
+          : "Groq no configurado";
+      } catch {
+        dot.classList.remove("online");
+        $("health-label").textContent = "API no disponible";
+        $("model-label").textContent = "Proveedor sin comprobar";
+      }
+    }
+    checkHealth();
+  </script>
+</body>
+</html>

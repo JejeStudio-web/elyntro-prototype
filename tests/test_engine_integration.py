@@ -148,6 +148,35 @@ def test_groq_credentials_are_not_forwarded_on_redirects_or_echoed_in_errors(mon
     assert "401" in result["error"]
 
 
+@pytest.mark.parametrize(
+    ("body", "expected_code"),
+    [
+        (b"not-json", "provider_invalid_json"),
+        (b'{"choices":[]}', "provider_invalid_response"),
+        (b'{"choices":[{"message":{"content":"  "}}]}', "provider_empty_response"),
+    ],
+)
+def test_groq_message_adapter_classifies_invalid_provider_responses(monkeypatch, body, expected_code):
+    import app as app_module
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return body
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setattr(app_module.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    result = app_module._groq_messages([{"role": "user", "content": "test"}])
+    assert result["text"] is None
+    assert result["error_code"] == expected_code
+    assert isinstance(result["retryable"], bool)
+
+
 def test_intent_router_has_no_ui_mode_dependency():
     import app as app_module
     assert app_module.classify_request("Explícame la fotosíntesis") == "chat"
@@ -156,19 +185,54 @@ def test_intent_router_has_no_ui_mode_dependency():
     assert app_module.classify_request("Investiga fuentes para este tema") == "research"
 
 
-def test_unified_execute_routes_chat_and_reports_model(monkeypatch):
+def test_unified_execute_uses_model_router_and_preserves_context(monkeypatch):
     import app as app_module
-    monkeypatch.setattr(app_module, "_groq_chat", lambda goal, direct=False: {
-        "configured": True, "text": "Respuesta de prueba", "model": "openai/gpt-oss-20b",
-        "requested_model": "openai/gpt-oss-20b", "response_id": "resp_test", "error": None
-    })
-    response = app_module.app.test_client().post('/api/execute', json={"goal": "Explícame qué es una célula"})
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    calls = []
+
+    def provider(messages, *, max_tokens=1800, temperature=0.2, json_mode=False):
+        calls.append(messages)
+        if max_tokens == 220:
+            return {"text": '{"route":"answer","reason":"Pregunta explicativa","search_query":""}'}
+        return {"text": "Respuesta de prueba", "model": "openai/gpt-oss-20b",
+                "requested_model": "openai/gpt-oss-20b", "response_id": "resp_test"}
+
+    monkeypatch.setattr(app_module, "_groq_messages", provider)
+    response = app_module.app.test_client().post(
+        '/api/execute',
+        json={"goal": "Explícame qué es una célula", "history": [{"role": "user", "content": "Estoy estudiando biología"}]},
+    )
     assert response.status_code == 200
     body = response.get_json()
     assert body["kind"] == "answer"
     assert body["route"] == "chat"
     assert body["returned_model"] == "openai/gpt-oss-20b"
     assert body["verification"]["status"] == "not_applicable"
+    assert body["route_source"] == "model"
+    assert len(calls) == 2
+    assert any("Estoy estudiando biología" in item["content"] for item in calls[-1])
+
+
+def test_unified_execute_falls_back_to_rules_when_model_decision_is_invalid(monkeypatch):
+    import app as app_module
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    calls = []
+
+    def provider(messages, *, max_tokens=1800, temperature=0.2, json_mode=False):
+        calls.append(max_tokens)
+        if max_tokens == 220:
+            return {"text": "not-json"}
+        return {"text": "Respuesta de reserva", "model": "fake-model"}
+
+    monkeypatch.setattr(app_module, "_groq_messages", provider)
+    response = app_module.app.test_client().post(
+        "/api/agent/execute", json={"goal": "Explícame qué es una célula"}
+    )
+    body = response.get_json()
+    assert response.status_code == 200
+    assert body["answer"] == "Respuesta de reserva"
+    assert body["route_source"] == "fallback"
+    assert calls == [220, 2400]
 
 
 def test_unified_execute_rejects_empty_input():
@@ -191,9 +255,26 @@ def test_direct_chat_reports_missing_groq_key_without_mocking_provider(monkeypat
     import app as app_module
     monkeypatch.delenv('GROQ_API_KEY', raising=False)
     response = app_module.app.test_client().post('/api/chat', json={'goal': 'Responde solo OK'})
-    assert response.status_code == 502
+    assert response.status_code == 503
     body = response.get_json()
     assert 'GROQ_API_KEY' in body['error']
+    assert body["error_detail"]["code"] == "provider_not_configured"
+    assert body["error_detail"]["stage"] == "answer"
+    assert body["error_detail"]["error_id"] == body["error_id"]
+
+
+def test_agent_execute_reports_provider_error_as_structured_diagnostic(monkeypatch):
+    import app as app_module
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    response = app_module.app.test_client().post(
+        "/api/agent/execute", json={"goal": "Explícame qué es una célula"}
+    )
+    body = response.get_json()
+    assert response.status_code == 503
+    assert body["ok"] is False
+    assert body["error_detail"]["code"] == "provider_not_configured"
+    assert body["error_detail"]["stage"] == "answer"
+    assert body["error_detail"]["retryable"] is False
 
 
 def test_render_config_does_not_extract_zips():
