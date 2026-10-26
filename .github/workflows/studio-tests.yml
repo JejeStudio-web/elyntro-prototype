@@ -28,6 +28,6 @@ jobs:
           scripts = re.findall(r'<script type="module">(.*?)</script>', html, flags=re.DOTALL)
           if len(scripts) != 1:
               raise SystemExit(f"Expected one Studio module script, found {len(scripts)}")
-          Path("/tmp/elyntro-studio.js").write_text(scripts[0], encoding="utf-8")
+          Path("/tmp/elyntro-studio.mjs").write_text(scripts[0], encoding="utf-8")
           PY
-          node --check /tmp/elyntro-studio.js
+          node --check /tmp/elyntro-studio.mjs
