@@ -9,3 +9,27 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.14.2
+      - key: ELYNTRO_BROWSER_WORKER_URL
+        fromService:
+          type: pserv
+          name: elyntro-browser-worker
+          property: hostport
+      - key: ELYNTRO_BROWSER_WORKER_TOKEN
+        sync: false
+      - key: ELYNTRO_BROWSER_ALLOWLIST
+        sync: false
+      - key: ELYNTRO_PLAYWRIGHT_ENABLED
+        value: "false"
+
+  - type: pserv
+    name: elyntro-browser-worker
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile.browser-worker
+    dockerContext: .
+    envVars:
+      - key: ELYNTRO_BROWSER_WORKER_TOKEN
+        sync: false
+      - key: ELYNTRO_BROWSER_ALLOWLIST
+        sync: false
