@@ -127,7 +127,11 @@ def _apply_api_limits():
         "/api/v1/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/v1/chat/completions": int(os.environ.get("ELYNTRO_RATE_LIMIT_CHAT_PER_MINUTE", "20")),
         "/api/tasks": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
+        "/api/creative/founder/selfdev/pull-request": int(os.environ.get("ELYNTRO_RATE_LIMIT_SELFDEV_PER_MINUTE", "3")),
+        "/api/creative/founder/proposals": int(os.environ.get("ELYNTRO_RATE_LIMIT_FOUNDER_PER_MINUTE", "10")),
     }
+    if request.method == "POST" and request.path.startswith("/api/creative/founder/"):
+        limits.setdefault(request.path, int(os.environ.get("ELYNTRO_RATE_LIMIT_FOUNDER_PER_MINUTE", "10")))
     if request.method != "POST" or request.path not in limits:
         return None
     limit = max(1, min(limits[request.path], 600))
