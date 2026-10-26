@@ -149,3 +149,43 @@ def test_versioned_api_remains_backward_compatible_when_key_is_unset(monkeypatch
     response = mod.app.test_client().get("/api/v1/models")
 
     assert response.status_code == 200
+
+
+
+def test_chat_completions_accepts_bounded_base64_image_parts(monkeypatch):
+    import app as mod
+
+    monkeypatch.delenv("ELYNTRO_API_KEY", raising=False)
+    monkeypatch.setenv("ELYNTRO_MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("ELYNTRO_MODEL_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setenv("ELYNTRO_MODEL", "vision-local")
+    observed = {}
+    def fake(messages, **kwargs):
+        observed["messages"] = messages
+        return {"text": "Veo una imagen", "model": "vision-local", "provider": "ollama"}
+    monkeypatch.setattr(mod, "_groq_messages", fake)
+    payload = {
+        "model": "elyntro-default",
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "Describe esta imagen"},
+            {"type": "image_url", "image_url": {
+                "url": "data:image/png;base64,aGVsbG8=", "detail": "low"
+            }}
+        ]}]
+    }
+    response = mod.app.test_client().post("/api/v1/chat/completions", json=payload)
+    assert response.status_code == 200
+    assert observed["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_chat_completions_rejects_remote_image_urls(monkeypatch):
+    import app as mod
+
+    monkeypatch.delenv("ELYNTRO_API_KEY", raising=False)
+    response = mod.app.test_client().post("/api/v1/chat/completions", json={
+        "messages": [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
+        ]}]
+    })
+    assert response.status_code == 400
+    assert response.get_json()["error"]["type"] == "invalid_request_error"
