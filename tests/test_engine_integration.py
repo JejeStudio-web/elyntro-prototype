@@ -395,7 +395,10 @@ def test_task_and_artifacts_survive_app_store_recreation(tmp_path, monkeypatch):
     expected_artifact = next(item for item in created.get_json()["task"]["artifacts"] if item["name"] == "index.html")
 
     reloaded_app = importlib.reload(app_module)
-    loaded = reloaded_app.app.test_client().get(f"/api/tasks/{task_id}")
+    task_token = created.get_json()["task_access_token"]
+    loaded = reloaded_app.app.test_client().get(
+        f"/api/tasks/{task_id}", headers={"Authorization": f"Bearer {task_token}"}
+    )
 
     assert loaded.status_code == 200
     persisted = loaded.get_json()["task"]
@@ -403,6 +406,9 @@ def test_task_and_artifacts_survive_app_store_recreation(tmp_path, monkeypatch):
     assert expected_artifact in persisted["artifacts"]
     assert any(event["event_type"] == "step_succeeded" for event in loaded.get_json()["events"])
 
-    downloaded = reloaded_app.app.test_client().get(f"/api/tasks/{task_id}/artifacts/index.html")
+    downloaded = reloaded_app.app.test_client().get(
+        f"/api/tasks/{task_id}/artifacts/index.html",
+        headers={"Authorization": f"Bearer {task_token}"},
+    )
     assert downloaded.status_code == 200
     assert "</html>" in downloaded.get_data(as_text=True)
