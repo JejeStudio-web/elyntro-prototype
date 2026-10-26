@@ -11,12 +11,12 @@ Lists the model configured for this Elyntro deployment, provider name, and basic
 ### `POST /api/v1/chat/completions`
 
 Accepts a bounded subset of the OpenAI Chat Completions request shape:
-- `messages`: 1–32 messages, with `system`, `user`, or `assistant` roles and text content.
+- `messages`: hasta 20 mensajes con roles `system`, `user` o `assistant`; el contenido puede ser texto o partes de texto e imágenes base64 PNG/JPEG/WebP en mensajes de usuario.
 - `model`: optional `elyntro-default` or the configured model ID. Other model IDs are rejected.
 - `max_tokens`: optional integer from 1 to 4096.
 - `temperature`: optional number from 0 to 2.
 - `response_format`: optional `{"type":"json_object"}`.
-- `stream`: streaming is not implemented in this first version; `stream: true` is rejected explicitly.
+- `stream`: `true` devuelve eventos Server-Sent Events (`text/event-stream`) del proveedor configurado; `false` devuelve JSON normal.
 
 The response uses a Chat Completions-compatible envelope and adds an `elyntro` metadata object. Provider token usage is passed through when supplied; otherwise usage is reported as zero rather than guessed.
 
@@ -87,10 +87,10 @@ or per-account quota management. Do not embed it in frontend JavaScript.
 ## Security and current limitations
 
 - Existing global request-size limits apply, and this endpoint has a per-IP request limit.
-- The request accepts only text messages and a constrained parameter set.
+- El endpoint acepta texto o imágenes base64 acotadas; audio y vídeo todavía no están soportados.
 - The endpoint uses the backend configured by the server; clients cannot select arbitrary upstream models or pass upstream URLs.
 - Provider credentials are read from environment variables and are not returned by the API.
-- Streaming, image/audio/video payloads, user-account authentication, per-account quotas, persistent usage billing, and API-key issuance are not implemented by this step.
+- Audio/vídeo, cuentas por usuario, cuotas por cuenta, facturación persistente y emisión/revocación de claves personales siguen pendientes.
 - The API is an Elyntro-controlled gateway; it does not make external model weights proprietary to Elyntro.
 - Existing application calls now use the same configured provider adapter for ordinary chat, model-assisted artifact creation, and model-assisted routing.
 
@@ -107,3 +107,19 @@ User messages may contain text parts and image parts in OpenAI-compatible
 JPEG, or WebP. Remote URLs are rejected. Image support depends on the configured
 model/provider; this API cannot add vision to a text-only model. Audio and video
 input are not supported by this version.
+
+## Recursos externos conectados al runtime del agente
+
+El runtime de tareas mantiene una lista de herramientas permitidas y un máximo de cinco pasos por petición. Además de cálculo seguro, búsqueda web configurada y lectura acotada de páginas públicas, ahora puede consultar:
+- `wikipedia_search`: API de Wikipedia en español, sin clave.
+- `crossref_search`: metadatos bibliográficos y DOI mediante Crossref, sin clave.
+- `arxiv_search`: artículos científicos de arXiv, sin clave.
+
+Estas herramientas consultan hosts fijos, limitan consulta, tiempo y tamaño de respuesta y devuelven título, URL y extracto para que Elyntro pueda mostrar procedencia. El contenido externo es evidencia no confiable, nunca instrucciones. La búsqueda web general sigue dependiendo de `ELYNTRO_SEARCH_PROVIDER` y de la configuración del proveedor elegido; Tavily requiere `TAVILY_API_KEY`, mientras que el adaptador DuckDuckGo no requiere esa clave. Los conectores públicos no necesitan crear cuentas ni activar servicios de pago.
+
+## Límites de esta integración
+
+- La conexión a una API pública no garantiza disponibilidad permanente ni exactitud del resultado.
+- Los conectores devuelven fuentes; no prueban por sí solos que una afirmación sea verdadera.
+- Las credenciales de modelos y de búsqueda, si se usan, se configuran solo en el servidor.
+- No se han añadido claves, servicios de pago ni nuevas cuentas externas.
