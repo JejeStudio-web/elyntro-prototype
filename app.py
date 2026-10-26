@@ -106,7 +106,6 @@ def _apply_api_limits():
         "/api/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/v1/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/v1/chat/completions": int(os.environ.get("ELYNTRO_RATE_LIMIT_CHAT_PER_MINUTE", "20")),
-        "/api/v1/chat/completions": int(os.environ.get("ELYNTRO_RATE_LIMIT_CHAT_PER_MINUTE", "20")),
         "/api/tasks": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
     }
     if request.method != "POST" or request.path not in limits:
@@ -243,7 +242,7 @@ def handle_analyze(inputs, context):
             "goal": goal,
             "method": "groq-source-grounded-synthesis",
             "external_model_used": True,
-            "provider": "groq",
+            "provider": result.get("provider", _model_provider_config()["provider"]),
             "model": result.get("model"),
             "analysis": analysis_text,
             "source_urls": source_urls,
@@ -255,8 +254,8 @@ def handle_analyze(inputs, context):
         result = _groq_chat(goal)
         if not result.get("text"):
             raise RuntimeError(result.get("error") or "No se obtuvo respuesta del proveedor.")
-        content = {"goal": goal, "method": "groq-chat-completions", "external_model_used": True,
-                   "provider": "groq", "model": result["model"], "analysis": result["text"],
+        content = {"goal": goal, "method": "provider-chat-completions", "external_model_used": True,
+                   "provider": result.get("provider", _model_provider_config()["provider"]), "model": result["model"], "analysis": result["text"],
                    "limitations": ["No se han consultado fuentes web externas", "La respuesta del modelo requiere evaluación independiente"]}
         summary = "Análisis generado por Groq (" + str(result["model"]) + "). No se ha realizado investigación web externa."
     artifact = {"name": "analisis_local.json", "content": content, "media_type": "application/json"}
@@ -528,78 +527,6 @@ def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=Fals
                 "error": "El proveedor agotó el tiempo de espera." if timed_out else "No se pudo conectar con el proveedor.",
                 "error_code": "provider_timeout" if timed_out else "provider_connection_failed",
                 "retryable": True, "provider": config["provider"]}
-
-
-@app.get("/api/v1/models")
-def api_v1_models():
-    config = _model_provider_config()
-    if config["provider"] not in {"groq", "openai", "ollama", "openai-compatible"}:
-        return jsonify({"error": {"message": "Proveedor no compatible", "type": "configuration_error"}}), 503
-    data = []
-    if config["model"]:
-        data.append({"id": config["model"], "object": "model", "owned_by": "elyntro",
-                     "provider": config["provider"], "configured": config["configured"],
-                     "capabilities": ["text", "chat_completions", "json_mode"]})
-    return jsonify({"object": "list", "data": data, "default_model": "elyntro-default",
-                    "provider": config["provider"], "configured": config["configured"]})
-
-
-@app.post("/api/v1/chat/completions")
-def api_v1_chat_completions():
-    body = request.get_json(silent=True)
-    if not isinstance(body, dict):
-        return jsonify({"error": {"message": "El cuerpo debe ser un objeto JSON", "type": "invalid_request_error"}}), 400
-    if body.get("stream", False) is not False:
-        return jsonify({"error": {"message": "El streaming todavía no está implementado; usa stream=false", "type": "unsupported_parameter"}}), 400
-    messages = body.get("messages")
-    if not isinstance(messages, list) or not messages or len(messages) > 32:
-        return jsonify({"error": {"message": "messages debe contener entre 1 y 32 mensajes", "type": "invalid_request_error"}}), 400
-    total_chars = 0
-    normalized = []
-    for item in messages:
-        if not isinstance(item, dict) or set(item) - {"role", "content"}:
-            return jsonify({"error": {"message": "Cada mensaje solo puede contener role y content", "type": "invalid_request_error"}}), 400
-        if item.get("role") not in {"system", "user", "assistant"} or not isinstance(item.get("content"), str):
-            return jsonify({"error": {"message": "Rol o contenido de mensaje no válido", "type": "invalid_request_error"}}), 400
-        total_chars += len(item["content"])
-        normalized.append({"role": item["role"], "content": item["content"]})
-    if total_chars > 60000:
-        return jsonify({"error": {"message": "El contenido total supera el límite de 60000 caracteres", "type": "invalid_request_error"}}), 413
-    config = _model_provider_config()
-    requested_model = body.get("model", "elyntro-default")
-    if not isinstance(requested_model, str) or requested_model not in {"elyntro-default", config.get("model")}:
-        return jsonify({"error": {"message": "Modelo no disponible en esta instalación de Elyntro", "type": "model_not_found"}}), 404
-    max_tokens = body.get("max_tokens", 1024)
-    temperature = body.get("temperature", 0.2)
-    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 1 <= max_tokens <= 4096:
-        return jsonify({"error": {"message": "max_tokens debe ser un entero entre 1 y 4096", "type": "invalid_request_error"}}), 400
-    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not 0 <= temperature <= 2:
-        return jsonify({"error": {"message": "temperature debe estar entre 0 y 2", "type": "invalid_request_error"}}), 400
-    response_format = body.get("response_format")
-    json_mode = False
-    if response_format is not None:
-        if not isinstance(response_format, dict) or response_format.get("type") != "json_object" or set(response_format) != {"type"}:
-            return jsonify({"error": {"message": "Solo se admite response_format.type=json_object", "type": "invalid_request_error"}}), 400
-        json_mode = True
-    result = _groq_messages(normalized, max_tokens=max_tokens, temperature=float(temperature), json_mode=json_mode)
-    if not result.get("text"):
-        status = _provider_http_status(result)
-        return jsonify({"error": {"message": result.get("error") or "El proveedor no pudo completar la solicitud",
-                                  "type": result.get("error_code", "provider_error"),
-                                  "retryable": bool(result.get("retryable", False))}}), status
-    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
-    return jsonify({
-        "id": result.get("response_id") or ("elyntro-" + uuid.uuid4().hex),
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": result.get("model") or config.get("model") or "elyntro-default",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": result["text"]}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": usage.get("prompt_tokens", 0),
-                  "completion_tokens": usage.get("completion_tokens", 0),
-                  "total_tokens": usage.get("total_tokens", 0)},
-        "elyntro": {"provider": result.get("provider", config["provider"]), "api_version": "v1"}
-    })
-
 
 
 def _provider_http_status(result):
@@ -984,7 +911,7 @@ def execute_unified():
                     status=503 if code == "provider_not_configured" else 502,
                     route=route,
                     extra={
-                        "provider": "groq",
+                        "provider": result.get("provider", _model_provider_config()["provider"]),
                         "requested_model": result.get("requested_model"),
                         "returned_model": result.get("returned_model"),
                         "events": result.get("events", []),
@@ -1038,7 +965,7 @@ def execute_unified():
             "route_reason": route_reason,
             "route_source": route_source,
             "answer": result["text"],
-            "provider": "groq",
+            "provider": result.get("provider", _model_provider_config()["provider"]),
             "requested_model": result.get("requested_model"),
             "returned_model": result.get("model"),
             "response_id": result.get("response_id"),
@@ -1103,7 +1030,7 @@ def direct_chat():
             stage="answer",
             retryable=result.get("retryable", False),
             status=_provider_http_status(result),
-            extra={"provider": "groq", "requested_model": result.get("requested_model")},
+            extra={"provider": result.get("provider", _model_provider_config()["provider"]), "requested_model": result.get("requested_model")},
         )
         return failure, status
     return jsonify({"ok": True, "answer": result["text"], "provider": "groq",
