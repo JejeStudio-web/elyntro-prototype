@@ -15,7 +15,7 @@ def render(messages):
         role, content = message.get("role"), message.get("content")
         if role not in {"system", "user", "assistant"} or not isinstance(content, str) or not content.strip():
             continue
-        chunks.append(f"<|{role}|>\\n{content.strip()}\\n")
+        chunks.append(f"<|{role}|>\n{content.strip()}\n")
     return "".join(chunks)
 
 
@@ -37,7 +37,7 @@ def load_examples(path, tokenizer, block_size):
                 role, content = message.get("role"), message.get("content")
                 if role not in {"system", "user", "assistant"} or not isinstance(content, str):
                     continue
-                segment = f"<|{role}|>\\n{content.strip()}\\n"
+                segment = f"<|{role}|>\n{content.strip()}\n"
                 token_ids = tokenizer.encode(segment)
                 ids.extend(token_ids)
                 answer_mask.extend([role == "assistant"] * len(token_ids))
