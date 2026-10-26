@@ -98,6 +98,23 @@ def _has_task_access(task_id: str) -> bool:
 def _apply_api_limits():
     if request.path.startswith("/api/") and request.content_length is not None and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
         return jsonify({"error": "La solicitud supera el límite de tamaño permitido."}), 413
+    # Optional shared API key for the versioned public API. If configured, every
+    # request to these endpoints must authenticate; never log or echo the key.
+    protected_api_paths = {"/api/v1/models", "/api/v1/chat/completions", "/api/v1/agent/execute"}
+    configured_api_key = os.environ.get("ELYNTRO_API_KEY", "").strip()
+    if request.path in protected_api_paths and configured_api_key:
+        authorization = request.headers.get("Authorization", "")
+        bearer = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+        supplied_key = bearer or request.headers.get("X-Elyntro-API-Key", "")
+        if not supplied_key or not hmac.compare_digest(supplied_key, configured_api_key):
+            return jsonify({
+                "error": {
+                    "message": "Se requiere una clave API válida de Elyntro.",
+                    "type": "authentication_error",
+                    "code": "invalid_api_key",
+                }
+            }), 401
+
     limits = {
         "/api/chat": int(os.environ.get("ELYNTRO_RATE_LIMIT_CHAT_PER_MINUTE", "20")),
         "/api/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),

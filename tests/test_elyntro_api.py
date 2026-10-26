@@ -104,3 +104,37 @@ def test_ollama_adapter_calls_configured_openai_compatible_endpoint(monkeypatch)
     assert observed["authorization"] is None
     assert observed["body"]["model"] == "local-test"
     assert observed["timeout"] == 55
+
+
+
+def test_versioned_api_requires_configured_api_key(monkeypatch):
+    import app as mod
+
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-elyntro-key")
+    client = mod.app.test_client()
+
+    missing = client.get("/api/v1/models")
+    wrong = client.get("/api/v1/models", headers={"Authorization": "Bearer wrong-key"})
+    valid_bearer = client.get("/api/v1/models", headers={
+        "Authorization": "Bearer test-elyntro-key"
+    })
+    valid_header = client.get("/api/v1/models", headers={
+        "X-Elyntro-API-Key": "test-elyntro-key"
+    })
+
+    assert missing.status_code == 401
+    assert missing.get_json()["error"]["code"] == "invalid_api_key"
+    assert wrong.status_code == 401
+    assert valid_bearer.status_code == 200
+    assert valid_header.status_code == 200
+    assert "test-elyntro-key" not in missing.get_data(as_text=True)
+    assert "test-elyntro-key" not in valid_bearer.get_data(as_text=True)
+
+
+def test_versioned_api_remains_backward_compatible_when_key_is_unset(monkeypatch):
+    import app as mod
+
+    monkeypatch.delenv("ELYNTRO_API_KEY", raising=False)
+    response = mod.app.test_client().get("/api/v1/models")
+
+    assert response.status_code == 200

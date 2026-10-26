@@ -65,6 +65,25 @@ curl -X POST https://YOUR-ELYNTRO-HOST/api/v1/chat/completions \
   }'
 ```
 
+## API key authentication
+
+The versioned endpoints support a deployment-wide API key. Configure the secret
+as `ELYNTRO_API_KEY` in the hosting provider's environment settings; never commit
+it to the repository or send it to a browser application.
+
+When configured, the following endpoints require either
+`Authorization: Bearer YOUR_KEY` or `X-Elyntro-API-Key: YOUR_KEY`:
+- `GET /api/v1/models`
+- `POST /api/v1/chat/completions`
+- `POST /api/v1/agent/execute`
+
+Missing or invalid keys receive HTTP 401 with error code `invalid_api_key`.
+Comparison uses a constant-time HMAC comparison. If `ELYNTRO_API_KEY` is unset,
+the API remains in backward-compatible public mode; this is intended for local
+development only. Set the variable in production before exposing these endpoints.
+This is a shared deployment key, not per-user identity, key issuance, revocation,
+or per-account quota management. Do not embed it in frontend JavaScript.
+
 ## Security and current limitations
 
 - Existing global request-size limits apply, and this endpoint has a per-IP request limit.
