@@ -186,6 +186,22 @@ def browser_action():
     except KeyError as exc:return jsonify({"error":str(exc)}),404
     except Exception as exc:return jsonify({"error":"Acción fallida.","detail":str(exc)[:200]}),502
 
+@studio_api.post("/browser/guide")
+def browser_guide():
+    denied=_denied()
+    if denied:return denied
+    body=_body(); selector=body.get("selector",""); note=_text(body.get("note","Sigue este elemento."),300)
+    if not isinstance(selector,str) or not selector.strip() or len(selector)>300:return jsonify({"error":"Selector CSS requerido."}),400
+    try:
+        page=_session(body.get("session_id",""))["page"]
+        locator=page.locator(selector).first
+        locator.wait_for(state="visible",timeout=4000)
+        locator.evaluate("""e=>{e.scrollIntoView({behavior:'instant',block:'center',inline:'center'});e.dataset.elyntroGuideOriginalOutline=e.style.outline||'';e.dataset.elyntroGuideOriginalOutlineOffset=e.style.outlineOffset||'';e.style.outline='3px solid #b8c5ff';e.style.outlineOffset='4px';e.style.transition='outline-color 150ms ease';}""")
+        label=locator.inner_text(timeout=1000)[:200] if locator.evaluate("(e)=>e.tagName.toLowerCase()") not in {"input","textarea","select"} else locator.get_attribute("aria-label") or locator.get_attribute("placeholder") or "campo"
+        return jsonify({"ok":True,"guided_element":label,"instruction":note,"url":page.url,"message":"Elemento resaltado en el navegador aislado; la superposición solo existe en esa sesión."})
+    except KeyError as exc:return jsonify({"error":str(exc)}),404
+    except Exception as exc:return jsonify({"error":"No se pudo resaltar el elemento.","detail":str(exc)[:200]}),502
+
 @studio_api.get("/browser/screenshot/<sid>")
 def browser_screenshot(sid):
     denied=_denied()
