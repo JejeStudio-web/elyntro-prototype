@@ -1,0 +1,3 @@
+# Install separately from the lightweight web service requirements.
+# Choose a PyTorch wheel compatible with your hardware.
+torch>=2.2,<3.0
