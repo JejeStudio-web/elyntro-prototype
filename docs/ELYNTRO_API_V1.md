@@ -103,5 +103,4 @@ chunk; the response ends with `data: [DONE]`. The implementation keeps the
 upstream connection open while yielding chunks. Network/provider errors after
 the HTTP stream begins are emitted as an SSE `error` object and then `[DONE]`;
 clients must inspect each event rather than relying only on the initial HTTP
-status. Streaming is text-only and does not imply tool-call, image, audio, or
-video support.
+status. Chat requests can also include user-message image parts using the OpenAI-compatible `image_url` content format, but only as bounded base64 data URLs for PNG, JPEG, or WebP. Remote image URLs are rejected to avoid server-side fetch risks. The configured model/provider must itself support vision; Elyntro does not add vision capability to text-only models. Audio and video payloads are not implemented.
