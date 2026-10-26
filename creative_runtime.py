@@ -96,18 +96,34 @@ def comfyui_generate():
         return _json_error("prompt debe ser texto de 1 a 4000 caracteres.", 400)
     if not isinstance(workflow, dict) or len(json.dumps(workflow)) > MAX_BODY:
         return _json_error("workflow debe ser un objeto JSON de hasta 64 KiB.", 400)
-    # Only substitute a positive prompt in a caller-provided ComfyUI API workflow.
-    # No arbitrary remote URL or model download is accepted.
-    prompt_nodes = 0
+    # Update only CLIP conditioning connected to a sampler's positive input.
+    # Never overwrite negative conditioning with the positive prompt.
+    positive_ids = set()
     for node in workflow.values():
-        if not isinstance(node, dict):
+        if not isinstance(node, dict) or not isinstance(node.get("inputs"), dict):
             continue
-        inputs = node.get("inputs")
-        if isinstance(inputs, dict) and node.get("class_type") == "CLIPTextEncode" and "text" in inputs:
-            inputs["text"] = prompt.strip()
-            prompt_nodes += 1
+        if node.get("class_type") in {"KSampler", "KSamplerAdvanced", "SamplerCustom", "SamplerCustomAdvanced"}:
+            positive = node["inputs"].get("positive")
+            if isinstance(positive, list) and positive and isinstance(positive[0], (str, int)):
+                positive_ids.add(str(positive[0]))
+    prompt_nodes = 0
+    if positive_ids:
+        for node_id in positive_ids:
+            node = workflow.get(node_id)
+            inputs = node.get("inputs") if isinstance(node, dict) else None
+            if isinstance(inputs, dict) and node.get("class_type") == "CLIPTextEncode" and isinstance(inputs.get("text"), str):
+                inputs["text"] = prompt.strip()
+                prompt_nodes += 1
+    else:
+        # A single encoder is unambiguous; multi-encoder workflows must expose sampler links.
+        encoders = [(node_id, node) for node_id, node in workflow.items()
+                    if isinstance(node, dict) and node.get("class_type") == "CLIPTextEncode"
+                    and isinstance(node.get("inputs"), dict) and isinstance(node["inputs"].get("text"), str)]
+        if len(encoders) == 1:
+            encoders[0][1]["inputs"]["text"] = prompt.strip()
+            prompt_nodes = 1
     if prompt_nodes == 0:
-        return _json_error("El workflow no contiene ningún nodo CLIPTextEncode con entrada text.", 400)
+        return _json_error("No se pudo identificar el nodo CLIPTextEncode positivo. Conecta un sampler al nodo positive; los workflows ambiguos se rechazan.", 400)
     body = json.dumps({"prompt": workflow}).encode()
     req = urllib.request.Request(base + "/prompt", data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
