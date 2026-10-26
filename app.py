@@ -180,118 +180,12 @@ def handle_research(inputs, context):
     )
 
 def _groq_chat(goal: str, direct: bool = False) -> dict:
-    """Call Groq chat completions. The API response, not model-generated text, is the source of model metadata."""
-    api_key = os.environ.get("GROQ_API_KEY", "").strip()
-    if not api_key:
-        return {"configured": False, "text": None, "model": None, "error": "GROQ_API_KEY no está configurada.",
-                "error_code": "provider_not_configured", "retryable": False}
-    model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b").strip()
-    system_prompt = (
-        "Eres Elyntro. Responde en español salvo que el usuario pida otro idioma. "
-        "Sigue exactamente el formato y la extensión que pide el usuario. "
-        "Si pide una respuesta breve o solo una palabra, devuelve únicamente eso; "
-        "no añadas análisis, pasos, títulos ni comprobaciones. No inventes acciones ni fuentes."
-        if direct else
-        "Eres Elyntro, un asistente analítico. Responde en español, con precisión. "
-        "Distingue hechos, inferencias y límites. No afirmes haber usado herramientas, "
-        "fuentes externas o realizado acciones que no hayas realizado. Estructura la respuesta "
-        "con objetivo, análisis, pasos y comprobaciones solo cuando sea útil."
-    )
-    payload = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": goal},
-        ],
-        "temperature": 0.2,
-        "max_tokens": 300 if direct else 1200,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "Elyntro/0.6 (+https://github.com/JejeStudio-web/elyntro-prototype)"},
-        method="POST",
-    )
-    req.add_unredirected_header("Authorization", f"Bearer {api_key}")
-    try:
-        with urllib.request.urlopen(req, timeout=45) as response:
-            raw_response = response.read().decode("utf-8")
-        try:
-            data = json.loads(raw_response)
-        except (ValueError, TypeError):
-            return {"configured": True, "text": None, "model": model, "requested_model": model,
-                    "error": "Groq devolvió JSON no válido.", "error_code": "provider_invalid_json",
-                    "retryable": False}
-        try:
-            answer = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError):
-            return {"configured": True, "text": None, "model": model, "requested_model": model,
-                    "error": "La respuesta del proveedor tenía una estructura inesperada.",
-                    "error_code": "provider_invalid_response", "retryable": False}
-        if not isinstance(answer, str) or not answer.strip():
-            return {"configured": True, "text": None, "model": model, "requested_model": model,
-                    "error": "El proveedor devolvió una respuesta vacía.",
-                    "error_code": "provider_empty_response", "retryable": True}
-        # This value comes from Groq's API response, never from the model's prose.
-        returned_model = data.get("model") if isinstance(data.get("model"), str) else None
-        return {
-            "configured": True, "text": answer.strip(),
-            "model": returned_model or model, "requested_model": model,
-            "response_id": data.get("id"), "usage": data.get("usage"), "error": None
-        }
-    except urllib.error.HTTPError as exc:
-        # Preserve the provider's error body for diagnosis, without exposing secrets or headers.
-        try:
-            raw = exc.read(4096).decode("utf-8", errors="replace").strip()
-        except Exception:
-            raw = ""
-        detail = None
-        code = None
-        kind = None
-        if raw:
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    err = parsed.get("error", parsed)
-                    if isinstance(err, dict):
-                        detail = err.get("message") or err.get("detail") or err.get("description")
-                        code = err.get("code")
-                        kind = err.get("type") or err.get("error_type")
-                    elif isinstance(err, str):
-                        detail = err
-                elif isinstance(parsed, str):
-                    detail = parsed
-            except (ValueError, TypeError):
-                pass
-            if not detail:
-                detail = raw
-        detail = str(detail or "").replace(api_key, "[clave oculta]")
-        detail = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1[oculto]", detail)
-        detail = re.sub(r"(?i)(gsk_[A-Za-z0-9_-]{8,})", "[clave oculta]", detail)[:700]
-        diagnostic = f"HTTP {exc.code}"
-        if kind:
-            diagnostic += f" · tipo: {kind}"
-        if code:
-            diagnostic += f" · código: {code}"
-        if detail:
-            diagnostic += f" · {detail}"
-        else:
-            diagnostic += " · Groq devolvió un cuerpo de error vacío."
-        error_code = (
-            "provider_authentication_failed" if exc.code == 401 else
-            "provider_permission_denied" if exc.code == 403 else
-            "provider_rate_limited" if exc.code == 429 else
-            "provider_unavailable" if exc.code >= 500 else
-            "provider_http_error"
-        )
-        return {"configured": True, "text": None, "model": model, "requested_model": model, "error": diagnostic,
-                "error_code": error_code, "retryable": exc.code == 429 or exc.code >= 500}
-    except (urllib.error.URLError, TimeoutError) as exc:
-        timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
-        return {"configured": True, "text": None, "model": model, "requested_model": model,
-                "error": "Groq agotó el tiempo de espera." if timed_out else "No se pudo conectar con Groq.",
-                "error_code": "provider_timeout" if timed_out else "provider_connection_failed",
-                "retryable": True}
+    config = _model_provider_config()
+    if not config['configured']:
+        return {'configured': False, 'text': None, 'model': None, 'error': 'El proveedor de modelos de Elyntro no está configurado.', 'error_code': 'provider_not_configured', 'retryable': False, 'provider': config['provider']}
+    system_prompt = 'Eres Elyntro. Responde en español con precisión y no inventes acciones ni fuentes.'
+    result = _groq_messages([{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': goal}], max_tokens=300 if direct else 1200, temperature=0.2)
+    return {'configured': True, **result, 'provider': result.get('provider', config['provider'])}
 
 def handle_analyze(inputs, context):
     goal = str(inputs.get("goal", ""))
