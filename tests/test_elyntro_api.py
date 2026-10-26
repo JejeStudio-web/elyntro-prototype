@@ -59,10 +59,10 @@ def test_chat_completions_supports_streaming_and_rejects_unknown_models(monkeypa
         def __enter__(self): return self
         def __exit__(self, *args): return False
         def __iter__(self):
-            yield b'data: {"id":"x","choices":[{"delta":{"content":"ok"}}]}\\n'
-            yield b'\\n'
-            yield b'data: [DONE]\\n'
-            yield b'\\n'
+            yield b'data: {"id":"x","choices":[{"delta":{"content":"ok"}}]}\n'
+            yield b'\n'
+            yield b'data: [DONE]\n'
+            yield b'\n'
     monkeypatch.setattr(api, "urlopen", lambda request, timeout: StreamResponse())
     client = mod.app.test_client()
     headers = {"Authorization": "Bearer test-client-key"}
