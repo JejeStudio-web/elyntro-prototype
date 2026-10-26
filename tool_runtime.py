@@ -157,6 +157,18 @@ class ToolRuntime:
                         artifacts.append(tool_result["artifact"])
                     if isinstance(tool_result.get("results"), list):
                         sources.extend(x for x in tool_result["results"] if isinstance(x, dict) and x.get("url"))
+                    if isinstance(tool_result.get("page"), dict):
+                        page = tool_result["page"]
+                        page_url = page.get("url")
+                        page_title = page.get("title")
+                        page_content = page.get("content")
+                        if (isinstance(page_url, str) and page_url.startswith(("http://", "https://"))
+                                and isinstance(page_title, str) and isinstance(page_content, str)):
+                            sources.append({
+                                "title": page_title[:220], "url": page_url[:1200],
+                                "content": page_content[:6500], "provider": "web_open",
+                                "retrieval": "opened_page",
+                            })
                     # Keep audit events compact: content is passed to the model, not echoed wholesale to the client.
                     evidence = {k: v for k, v in tool_result.items() if k not in {"content", "artifact", "page", "results"}}
                     if isinstance(tool_result.get("artifact"), dict):
