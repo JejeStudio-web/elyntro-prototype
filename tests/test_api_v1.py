@@ -159,3 +159,21 @@ def test_v1_chat_normalizes_untrusted_provider_usage(api_client, monkeypatch):
     assert response.get_json()["usage"] == {
         "prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 0,
     }
+
+
+def test_v1_routes_are_registered_once(api_client):
+    import app as app_module
+
+    paths = [rule.rule for rule in app_module.app.url_map.iter_rules()]
+    assert paths.count("/api/v1/models") == 1
+    assert paths.count("/api/v1/chat/completions") == 1
+
+
+def test_v1_defaults_to_the_existing_groq_runtime(api_client, monkeypatch):
+    monkeypatch.setenv("ELYNTRO_MODEL_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    response = api_client.get("/api/v1/models", headers=auth())
+    assert response.status_code == 200
+    assert response.get_json()["data"][0]["id"] == "openai/gpt-oss-20b"
+    assert response.get_json()["data"][0]["owned_by"] == "groq"
