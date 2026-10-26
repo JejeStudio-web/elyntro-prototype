@@ -72,3 +72,22 @@ def test_arxiv_connector_parses_atom_and_rejects_empty_query(monkeypatch):
     assert result["results"][0]["title"] == "A scientific paper"
     assert result["results"][0]["url"] == "https://arxiv.org/abs/2401.00001"
     assert external_resources.arxiv_search({"query": " "})["ok"] is False
+
+
+
+def test_external_resources_are_reachable_from_elyntro_agent_runtime(monkeypatch):
+    import app as mod
+
+    monkeypatch.setattr(external_resources, "crossref_search", lambda args: {
+        "ok": True, "summary": "1 resultado recuperado de Crossref.",
+        "results": [{"title": "A useful paper", "url": "https://doi.org/10.5555/example", "source": "Crossref"}],
+    })
+    decisions = iter([
+        {"text": json.dumps({"action": "tool", "tool": "crossref_search", "arguments": {"query": "useful paper"}})},
+        {"text": json.dumps({"action": "final", "answer": "He consultado Crossref y he recuperado una fuente."})},
+    ])
+    monkeypatch.setattr(mod, "_groq_messages", lambda *args, **kwargs: next(decisions))
+    result = mod._run_tool_agent("Busca un artículo académico", [])
+    assert result["ok"] is True
+    assert result["events"][0]["tool"] == "crossref_search"
+    assert result["events"][0]["status"] == "succeeded"
