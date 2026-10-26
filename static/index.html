@@ -80,6 +80,12 @@
     .nav button:hover, .nav button.active { border-color: #ffffff10; background: #ffffff0b; color: var(--text); }
     .nav-icon { width: 18px; color: var(--accent); text-align: center; }
     .side-note { margin-top: auto; padding: 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); font-size: 12px; }
+    .conversation-list { display: grid; gap: 4px; max-height: 34vh; overflow: auto; }
+    .conversation-item { display: flex; gap: 5px; min-width: 0; }
+    .conversation-item button { min-width: 0; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #c2cbdd; text-align: left; padding: 8px 9px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-item button:first-child { flex: 1; }
+    .conversation-item button.active, .conversation-item button:hover { border-color: #ffffff10; background: #ffffff0b; color: var(--text); }
+    .conversation-item .delete-conversation { flex: 0 0 auto; padding: 6px 8px; color: var(--muted); }
     .side-note strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 12px; }
     .main { min-width: 0; display: flex; flex-direction: column; }
     .topbar {
@@ -207,7 +213,7 @@
       <div class="brand"><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
       <button class="new-task" id="new-task" type="button">＋ &nbsp; Nueva tarea</button>
       <div>
-        <p class="side-label">Espacio de trabajo</p>
+        <p class="side-label">Conversaciones</p><div class="conversation-list" id="conversation-list" aria-label="Conversaciones guardadas"></div><p class="side-label">Espacio de trabajo</p>
         <nav class="nav">
           <button class="active" type="button" aria-current="page"><span class="nav-icon">◈</span> Asistente</button>
           <button type="button" data-prompt="Investiga fuentes sobre "><span class="nav-icon">⌕</span> Investigación</button>
@@ -276,7 +282,10 @@
     const $ = (id) => document.getElementById(id);
     const conversation = $("conversation");
     const history = [];
-    const HISTORY_KEY = "elyntro.conversation.v1";
+    const HISTORY_KEY = "elyntro.conversations.v2";
+    const LEGACY_HISTORY_KEY = "elyntro.conversation.v1";
+    const conversations = [];
+    let activeConversationId = null;
     const THEME_KEY = "elyntro.theme.v1";
     let busy = false;
     let attachedText = null;
@@ -552,36 +561,135 @@
         $("composer-form").requestSubmit();
       }
     });
-    $("new-task").addEventListener("click", () => {
-      if (busy && activeController) activeController.abort();
+    $("new-task").addEventListener("click", createConversation);
+
+    function titleFor(messages) {
+      const first = messages.find(item => item.role === "user");
+      const title = String(first?.content || "Nueva conversación").replace(/\s+/g, " ").trim();
+      return title.length > 42 ? title.slice(0, 39) + "…" : title;
+    }
+
+    function persistConversations() {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify({
+          activeId: activeConversationId,
+          items: conversations.map(item => ({ ...item, messages: item.messages.slice(-40) }))
+        }));
+      } catch { $("status").textContent = "No se pudieron guardar las conversaciones en este navegador."; }
+    }
+
+    function saveHistory() {
+      const current = conversations.find(item => item.id === activeConversationId);
+      if (!current) return;
+      current.messages = history.slice(-40);
+      current.title = titleFor(current.messages);
+      current.updatedAt = Date.now();
+      persistConversations();
+      renderConversationList();
+    }
+
+    function renderConversationList() {
+      const list = $("conversation-list");
+      list.replaceChildren();
+      [...conversations].sort((a, b) => b.updatedAt - a.updatedAt).forEach(item => {
+        const row = element("div", "conversation-item");
+        const open = element("button", item.id === activeConversationId ? "active" : "", item.title || "Nueva conversación");
+        open.type = "button";
+        open.title = item.title || "Nueva conversación";
+        open.addEventListener("click", () => switchConversation(item.id));
+        const remove = element("button", "delete-conversation", "×");
+        remove.type = "button";
+        remove.title = "Eliminar conversación";
+        remove.addEventListener("click", () => deleteConversation(item.id));
+        row.append(open, remove);
+        list.append(row);
+      });
+    }
+
+    function clearVisibleConversation() {
       conversation.replaceChildren();
       history.splice(0, history.length);
-      saveHistory();
+      $("welcome").hidden = false;
+      $("suggestions").hidden = false;
+    }
+
+    function switchConversation(id) {
+      if (busy) { $("status").textContent = "Espera a que termine la petición antes de cambiar de conversación."; return; }
+      const target = conversations.find(item => item.id === id);
+      if (!target) return;
+      activeConversationId = id;
+      clearVisibleConversation();
+      target.messages.slice(-40).forEach(item => {
+        history.push({ role: item.role, content: item.content });
+        addMessage(item.role, "Historial local", item.content);
+      });
+      persistConversations();
+      renderConversationList();
+      $("status").textContent = "Conversación abierta. El historial se guarda en este navegador.";
+    }
+
+    function createConversation() {
+      if (busy && activeController) activeController.abort();
+      const item = { id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())), title: "Nueva conversación", updatedAt: Date.now(), messages: [] };
+      conversations.push(item);
+      activeConversationId = item.id;
+      clearVisibleConversation();
       attachedText = null;
       $("attachment").replaceChildren();
       $("file-input").value = "";
-      $("welcome").hidden = false;
-      $("suggestions").hidden = false;
+      persistConversations();
+      renderConversationList();
       $("status").textContent = "Nueva conversación iniciada.";
       $("prompt").focus();
-    });
+    }
 
-    function saveHistory() {
-      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-12))); }
-      catch { $("status").textContent = "El historial no se pudo guardar en este navegador."; }
+    function deleteConversation(id) {
+      if (busy && id === activeConversationId) { $("status").textContent = "No se puede eliminar la conversación mientras hay una petición en curso."; return; }
+      const index = conversations.findIndex(item => item.id === id);
+      if (index < 0) return;
+      const wasActive = id === activeConversationId;
+      conversations.splice(index, 1);
+      if (wasActive) {
+        activeConversationId = null;
+        if (conversations.length) switchConversation(conversations[0].id);
+        else createConversation();
+      } else { persistConversations(); renderConversationList(); }
+      $("status").textContent = "Conversación eliminada de este navegador.";
     }
 
     function restoreHistory() {
       try {
-        const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-        if (!Array.isArray(saved)) return;
-        for (const item of saved.slice(-12)) {
-          if (!item || !["user", "assistant"].includes(item.role) || typeof item.content !== "string") continue;
-          history.push({ role: item.role, content: item.content });
-          addMessage(item.role, "Historial local", item.content);
+        const raw = localStorage.getItem(HISTORY_KEY);
+        const saved = raw ? JSON.parse(raw) : null;
+        if (saved && Array.isArray(saved.items)) {
+          saved.items.slice(0, 100).forEach(item => {
+            if (!item || typeof item.id !== "string" || !Array.isArray(item.messages)) return;
+            const messages = item.messages.filter(message => message && ["user", "assistant"].includes(message.role) && typeof message.content === "string").slice(-40);
+            conversations.push({ id: item.id, title: typeof item.title === "string" ? item.title.slice(0, 120) : titleFor(messages), updatedAt: Number(item.updatedAt) || Date.now(), messages });
+          });
+          activeConversationId = conversations.some(item => item.id === saved.activeId) ? saved.activeId : conversations[0]?.id || null;
+        } else {
+          const legacy = JSON.parse(localStorage.getItem(LEGACY_HISTORY_KEY) || "[]");
+          if (Array.isArray(legacy) && legacy.length) {
+            const messages = legacy.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-40);
+            const item = { id: String(Date.now()), title: titleFor(messages), updatedAt: Date.now(), messages };
+            conversations.push(item); activeConversationId = item.id;
+          }
         }
-        if (history.length) $("status").textContent = "Conversación restaurada desde este navegador; los detalles de tareas y archivos no se guardan en el historial local.";
-      } catch { localStorage.removeItem(HISTORY_KEY); }
+        if (!conversations.length) {
+          const item = { id: String(Date.now()), title: "Nueva conversación", updatedAt: Date.now(), messages: [] };
+          conversations.push(item); activeConversationId = item.id;
+        }
+        const active = conversations.find(item => item.id === activeConversationId);
+        active.messages.forEach(item => { history.push({ role: item.role, content: item.content }); addMessage(item.role, "Historial local", item.content); });
+        persistConversations();
+        renderConversationList();
+        if (history.length) $("status").textContent = "Conversación restaurada; los detalles de tareas y archivos no se guardan en el historial local.";
+      } catch {
+        try { localStorage.removeItem(HISTORY_KEY); localStorage.removeItem(LEGACY_HISTORY_KEY); } catch {}
+        const item = { id: String(Date.now()), title: "Nueva conversación", updatedAt: Date.now(), messages: [] };
+        conversations.push(item); activeConversationId = item.id; persistConversations(); renderConversationList();
+      }
     }
 
     $("export-chat").addEventListener("click", () => {
@@ -606,7 +714,10 @@
       $("file-input").value = "";
       $("welcome").hidden = false;
       $("suggestions").hidden = false;
-      $("status").textContent = "Historial local borrado. El tema visual se conserva.";
+      conversations.splice(0, conversations.length);
+      activeConversationId = null;
+      createConversation();
+      $("status").textContent = "Todas las conversaciones locales se han borrado. El tema visual se conserva."
       $("prompt").focus();
     });
 
