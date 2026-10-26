@@ -58,3 +58,8 @@ def test_tool_agent_advertises_page_opening_capability(monkeypatch):
     assert result["events"][0]["tool"] == "web_open"
     assert result["events"][0]["status"] == "succeeded"
     assert any("web_open" in prompt for prompt in seen)
+    assert result["sources"] == [{
+        "title": "Guía", "url": "https://example.com/guide",
+        "content": "Texto de ejemplo de una página pública.",
+        "provider": "web_open", "retrieval": "opened_page",
+    }]
