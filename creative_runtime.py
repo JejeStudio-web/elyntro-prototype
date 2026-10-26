@@ -88,6 +88,8 @@ def _proxy_browser_worker(endpoint: str):
     token = os.getenv("ELYNTRO_BROWSER_WORKER_TOKEN", "").strip()
     if not base or not token:
         return _json_error("El worker privado de Playwright no está configurado; el navegador permanece desactivado.", 503)
+    if "://" not in base:
+        base = "http://" + base
     parsed = urllib.parse.urlsplit(base)
     if parsed.scheme != "http" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
         return _json_error("ELYNTRO_BROWSER_WORKER_URL debe ser un origen HTTP privado válido de Render.", 503)
@@ -250,133 +252,17 @@ def browser_inspect():
     if not _authorized():
         return _json_error("Se requiere una clave API de Elyntro configurada.", 401)
     if os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() != "true":
-        return _json_error("El control Playwright está desactivado por defecto. Actívalo solo en un entorno aislado.", 503)
+        return _json_error("El control Playwright está desactivado por defecto.", 503)
     return _proxy_browser_worker("/v1/inspect")
-    try:
-        from search_providers import is_public_http_url
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        return _json_error("Playwright no está instalado en este entorno.", 503)
-    payload = request.get_json(silent=True) or {}
-    url = payload.get("url")
-    allowed = [x.strip().lower() for x in os.getenv("ELYNTRO_BROWSER_ALLOWLIST", "").split(",") if x.strip()]
-    if not isinstance(url, str) or not is_public_http_url(url):
-        return _json_error("Solo se admiten URL HTTP(S) públicas validadas.", 400)
-    host = (urllib.parse.urlsplit(url).hostname or "").lower()
-    if not allowed or not any(host == d or host.endswith("." + d) for d in allowed):
-        return _json_error("El dominio no está en ELYNTRO_BROWSER_ALLOWLIST.", 403)
-    # Read-only snapshot: no form submission, clicks, downloads, file access, or persistent profile.
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=False)
-            def guard_request(route):
-                candidate = route.request.url
-                candidate_host = (urllib.parse.urlsplit(candidate).hostname or "").lower()
-                if not is_public_http_url(candidate) or not any(
-                    candidate_host == domain or candidate_host.endswith("." + domain)
-                    for domain in allowed
-                ):
-                    route.abort()
-                else:
-                    route.continue_()
-            page.route("**/*", guard_request)
-            page.goto(url, wait_until="domcontentloaded", timeout=12000)
-            final_url = page.url
-            final_host = (urllib.parse.urlsplit(final_url).hostname or "").lower()
-            if not is_public_http_url(final_url) or not any(final_host == d or final_host.endswith("." + d) for d in allowed):
-                browser.close()
-                return _json_error("La navegación redirigió fuera del dominio público permitido.", 403)
-            snapshot = page.evaluate("""() => ({
-              title: document.title.slice(0,300),
-              url: location.href,
-              text: (document.body?.innerText || '').slice(0,12000),
-              links: Array.from(document.querySelectorAll('a[href]')).slice(0,80).map(a => ({
-                text: (a.innerText || a.getAttribute('aria-label') || '').trim().slice(0,160),
-                href: a.href
-              })).filter(a => /^https?:/.test(a.href))
-            })""")
-            screenshot = base64.b64encode(page.screenshot(type="jpeg", quality=45, full_page=False)).decode("ascii")
-            browser.close()
-    except Exception as exc:
-        return jsonify({"ok": False, "error": "No se pudo inspeccionar la página.", "detail": type(exc).__name__}), 502
-    return jsonify({"ok": True, "snapshot": snapshot, "screenshot_data_url": "data:image/jpeg;base64," + screenshot, "mode": "read_only", "actions_taken": []})
 
 
 @creative_api.post("/browser/act")
 def browser_act():
-    """Execute a small, auditable set of non-form browser navigation actions."""
     if not _authorized():
         return _json_error("Se requiere una clave API de Elyntro configurada.", 401)
     if os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() != "true":
         return _json_error("El control Playwright está desactivado por defecto.", 503)
     return _proxy_browser_worker("/v1/act")
-    try:
-        from playwright.sync_api import sync_playwright
-        from search_providers import is_public_http_url
-    except Exception:
-        return _json_error("Playwright no está instalado en este entorno.", 503)
-    payload = request.get_json(silent=True) or {}
-    url, actions = payload.get("url"), payload.get("actions", [])
-    allowed = [x.strip().lower() for x in os.getenv("ELYNTRO_BROWSER_ALLOWLIST", "").split(",") if x.strip()]
-    if not isinstance(url, str) or not is_public_http_url(url):
-        return _json_error("Solo se admiten URL HTTP(S) públicas validadas.", 400)
-    host = (urllib.parse.urlsplit(url).hostname or "").lower()
-    if not allowed or not any(host == d or host.endswith("." + d) for d in allowed):
-        return _json_error("El dominio no está en ELYNTRO_BROWSER_ALLOWLIST.", 403)
-    if not isinstance(actions, list) or len(actions) > 8:
-        return _json_error("actions debe ser una lista de hasta 8 acciones.", 400)
-    for action in actions:
-        if not isinstance(action, dict) or action.get("type") not in {"click_link", "click_button", "hover_text", "scroll"}:
-            return _json_error("Acción no admitida. Usa click_link, click_button, hover_text o scroll.", 400)
-        if action["type"] in {"click_link", "click_button", "hover_text"} and (not isinstance(action.get("text"), str) or not action["text"].strip() or len(action["text"]) > 160):
-            return _json_error("La acción requiere texto exacto de hasta 160 caracteres.", 400)
-        if action["type"] == "click_button" and re.search(r"delete|remove|purchase|buy|pay|submit|send|confirm|logout|log out|eliminar|borrar|comprar|pagar|enviar|confirmar|cerrar sesión", action["text"], re.I):
-            return _json_error("El botón parece destructivo o transaccional; Elyntro no lo pulsará.", 400)
-        if action["type"] == "scroll" and action.get("direction") not in {"up", "down"}:
-            return _json_error("scroll.direction debe ser up o down.", 400)
-    completed = []
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=False)
-            def guard_request(route):
-                candidate = route.request.url
-                candidate_host = (urllib.parse.urlsplit(candidate).hostname or "").lower()
-                if not is_public_http_url(candidate) or not any(candidate_host == d or candidate_host.endswith("." + d) for d in allowed):
-                    route.abort()
-                else:
-                    route.continue_()
-            page.route("**/*", guard_request)
-            page.goto(url, wait_until="domcontentloaded", timeout=12000)
-            for action in actions:
-                if action["type"] == "scroll":
-                    page.evaluate("(direction) => window.scrollBy(0, direction === 'down' ? Math.min(window.innerHeight * 0.8, 640) : -Math.min(window.innerHeight * 0.8, 640))", action["direction"])
-                    completed.append({"type": "scroll", "direction": action["direction"], "ok": True})
-                elif action["type"] == "hover_text":
-                    page.get_by_text(action["text"].strip(), exact=True).first.hover(timeout=3000)
-                    completed.append({"type": "hover_text", "text": action["text"].strip(), "ok": True})
-                elif action["type"] == "click_button":
-                    locator = page.get_by_role("button", name=action["text"].strip(), exact=True).first
-                    safe = locator.evaluate("(el) => !el.disabled && !el.closest('form') && !el.hasAttribute('download')")
-                    if not safe:
-                        raise ValueError("El botón está deshabilitado o forma parte de un formulario.")
-                    locator.click(timeout=3000)
-                    completed.append({"type": "click_button", "text": action["text"].strip(), "ok": True})
-                else:
-                    locator = page.get_by_role("link", name=action["text"].strip(), exact=True).first
-                    locator.click(timeout=3000)
-                    page.wait_for_load_state("domcontentloaded", timeout=5000)
-                    final_host = (urllib.parse.urlsplit(page.url).hostname or "").lower()
-                    if not is_public_http_url(page.url) or not any(final_host == d or final_host.endswith("." + d) for d in allowed):
-                        raise ValueError("La navegación intentó salir de la allowlist.")
-                    completed.append({"type": "click_link", "text": action["text"].strip(), "ok": True, "url": page.url})
-            snapshot = page.evaluate("""() => ({title: document.title.slice(0,300), url: location.href, text: (document.body?.innerText || '').slice(0,12000)})""")
-            screenshot = base64.b64encode(page.screenshot(type="jpeg", quality=45, full_page=False)).decode("ascii")
-            browser.close()
-    except Exception as exc:
-        return jsonify({"ok": False, "error": "La sesión de navegador no pudo completar todas las acciones.", "detail": type(exc).__name__, "actions_completed": completed}), 502
-    return jsonify({"ok": True, "mode": "ephemeral_allowlisted", "actions_completed": completed, "snapshot": snapshot, "screenshot_data_url": "data:image/jpeg;base64," + screenshot})
 
 
 def _github_api(method: str, path: str, payload: dict | None = None, *, allow_missing: bool = False):
