@@ -949,7 +949,7 @@ def execute_unified():
                 status=_provider_http_status(result),
                 route=route,
                 extra={
-                    "provider": "groq",
+                    "provider": result.get("provider", _model_provider_config()["provider"]),
                     "requested_model": result.get("requested_model"),
                     "verification": {
                         "status": "not_applicable",
@@ -1033,7 +1033,7 @@ def direct_chat():
             extra={"provider": result.get("provider", _model_provider_config()["provider"]), "requested_model": result.get("requested_model")},
         )
         return failure, status
-    return jsonify({"ok": True, "answer": result["text"], "provider": "groq",
+    return jsonify({"ok": True, "answer": result["text"], "provider": result.get("provider", _model_provider_config()["provider"]),
                     "requested_model": result.get("requested_model"),
                     "returned_model": result.get("model"), "response_id": result.get("response_id"),
                     "usage": result.get("usage"), "path": "direct-chat-no-planner"})
