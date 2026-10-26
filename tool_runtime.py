@@ -37,6 +37,15 @@ class ToolRuntime:
         artifacts: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         transcript = [{"role": "system", "content": self._system_prompt()}]
+        tool_descriptions = {
+            "calculate": "Evalúa una expresión aritmética limitada sin ejecutar código dinámico. Argumento: expression (texto).",
+            "web_search": "Busca en el proveedor web configurado. Argumento: query (texto de hasta 400 caracteres).",
+        }
+        capabilities = {name: tool_descriptions.get(name, "Herramienta permitida; consulta su contrato en el código.") for name in self.tools}
+        transcript.append({
+            "role": "system",
+            "content": "Herramientas disponibles (solo estas pueden ejecutarse): " + json.dumps(capabilities, ensure_ascii=False),
+        })
         for item in (history or [])[-8:]:
             if isinstance(item, dict) and item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str):
                 transcript.append({"role": item["role"], "content": item["content"][:4000]})
