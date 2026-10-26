@@ -56,10 +56,10 @@ jobs:
       - name: Generate small smoke evaluation set
         run: |
           mkdir -p data/eval reports
-          printf '%s\\n' \\
-            '{"prompt":"Explica la fotosíntesis en una frase.","category":"spanish_knowledge"}' \\
-            '{"prompt":"Responde en español: ¿qué debes hacer si no sabes una respuesta?","category":"calibration"}' \\
-            > data/eval/smoke.jsonl
+          cat > data/eval/smoke.jsonl <<'EOF'
+          {"prompt":"Explica la fotosíntesis en una frase.","category":"spanish_knowledge"}
+          {"prompt":"Responde en español: ¿qué debes hacer si no sabes una respuesta?","category":"calibration"}
+          EOF
       - name: Evaluate checkpoint smoke cases
         run: >-
           python -m elyntro_model.evaluate
