@@ -1,26 +1,37 @@
 name: Elyntro model training pipeline
 
 on:
+  push:
+    branches: [model/training-data-evaluation-serving]
+    paths:
+      - ".github/workflows/model-training.yml"
+      - "elyntro_model/**"
+      - "requirements-model.txt"
   workflow_dispatch:
     inputs:
       records:
-        description: Maximum records to stream from each dataset
+        description: Maximum records to stream from each dataset (1-5000)
         required: true
         default: "300"
         type: string
       pretrain_steps:
-        description: CPU pretraining steps for the experimental small model
+        description: CPU pretraining steps (1-1000)
         required: true
         default: "100"
         type: string
       sft_steps:
-        description: Instruction fine-tuning steps
+        description: Instruction fine-tuning steps (1-500)
         required: true
         default: "50"
         type: string
 
 permissions:
   contents: read
+
+env:
+  RECORDS: ${{ inputs.records || '300' }}
+  PRETRAIN_STEPS: ${{ inputs.pretrain_steps || '100' }}
+  SFT_STEPS: ${{ inputs.sft_steps || '50' }}
 
 jobs:
   train-small-experiment:
@@ -33,18 +44,27 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements-model.txt
+      - name: Validate bounded compute inputs
+        shell: bash
+        run: |
+          for value in "$RECORDS" "$PRETRAIN_STEPS" "$SFT_STEPS"; do
+            case "$value" in ''|*[!0-9]*) echo "Inputs must be positive integers" >&2; exit 1;; esac
+          done
+          (( RECORDS >= 1 && RECORDS <= 5000 )) || { echo "RECORDS must be 1..5000" >&2; exit 1; }
+          (( PRETRAIN_STEPS >= 1 && PRETRAIN_STEPS <= 1000 )) || { echo "PRETRAIN_STEPS must be 1..1000" >&2; exit 1; }
+          (( SFT_STEPS >= 1 && SFT_STEPS <= 500 )) || { echo "SFT_STEPS must be 1..500" >&2; exit 1; }
       - name: Install model and dataset dependencies
         run: python -m pip install -r requirements-model.txt
       - name: Download bounded Spanish pretraining sample
-        run: python -m elyntro_model.data --source wikipedia-es --max-records ${{ inputs.records }} --out-dir data/downloaded
+        run: python -m elyntro_model.data --source wikipedia-es --max-records "$RECORDS" --out-dir data/downloaded
       - name: Download bounded Spanish instruction sample
-        run: python -m elyntro_model.data --source spanish-sft --max-records ${{ inputs.records }} --out-dir data/downloaded
+        run: python -m elyntro_model.data --source spanish-sft --max-records "$RECORDS" --out-dir data/downloaded
       - name: Train base model on CPU
         run: >-
           python -m elyntro_model.train
           --data data/downloaded/wikipedia-es.txt
           --out checkpoints/elyntro-es-base.pt
-          --steps ${{ inputs.pretrain_steps }} --batch-size 2 --block-size 64
+          --steps "$PRETRAIN_STEPS" --batch-size 2 --block-size 64
           --layers 2 --heads 2 --embedding 64 --device cpu
       - name: Fine-tune on instruction data
         run: >-
@@ -52,7 +72,7 @@ jobs:
           --checkpoint checkpoints/elyntro-es-base.pt
           --data data/downloaded/spanish-sft.jsonl
           --out checkpoints/elyntro-es-instruct.pt
-          --steps ${{ inputs.sft_steps }} --batch-size 2 --device cpu
+          --steps "$SFT_STEPS" --batch-size 2 --device cpu
       - name: Generate small smoke evaluation set
         run: |
           mkdir -p data/eval reports
