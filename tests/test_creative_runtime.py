@@ -121,3 +121,44 @@ def test_studio_contains_scene_transform_and_export_controls():
     assert 'id="workflowExample"' in html
     assert 'id="checkGeneration"' in html
     assert 'id="clickBrowserButton"' in html
+
+
+
+def test_comfyui_history_returns_only_output_image_references(monkeypatch):
+    import json
+    import creative_runtime
+    import app as mod
+
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-api-key")
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://comfyui.test:8188")
+    payload = {"prompt-123": {"outputs": {
+        "7": {"images": [
+            {"filename": "render.png", "subfolder": "", "type": "output"},
+            {"filename": "temp.png", "subfolder": "", "type": "temp"},
+            {"filename": "../escape.png", "subfolder": "", "type": "output"},
+        ]}
+    }}}
+
+    class FakeResponse:
+        headers = {}
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, limit=-1):
+            return json.dumps(payload).encode("utf-8")
+
+    def fake_urlopen(request, timeout=0):
+        assert request.full_url == "http://comfyui.test:8188/history/prompt-123"
+        return FakeResponse()
+
+    monkeypatch.setattr(creative_runtime.urllib.request, "urlopen", fake_urlopen)
+    response = mod.app.test_client().get(
+        "/api/creative/comfyui/history/prompt-123",
+        headers={"Authorization": "Bearer test-api-key"},
+    )
+    assert response.status_code == 200
+    images = response.get_json()["images"]
+    assert len(images) == 1
+    assert images[0]["filename"] == "render.png"
+    assert images[0]["url"] == "/api/creative/comfyui/view/prompt-123/render.png"
