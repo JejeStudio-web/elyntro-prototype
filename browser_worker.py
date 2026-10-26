@@ -2,7 +2,6 @@
 from __future__ import annotations
 import base64, hmac, ipaddress, os, re, socket, urllib.parse
 from flask import Flask, jsonify, request
-from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
@@ -48,6 +47,7 @@ def _run(payload, domains, with_actions=False):
             if a["type"]=="scroll" and a.get("direction") not in {"up","down"}: return {"ok":False,"error":"Dirección de scroll no válida."},400
     completed=[]
     try:
+        from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser=p.chromium.launch(headless=True,args=["--disable-background-networking","--disable-sync"])
             context=browser.new_context(viewport={"width":1280,"height":800},accept_downloads=False,service_workers="block")
