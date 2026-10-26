@@ -170,3 +170,83 @@ def test_comfyui_history_returns_only_output_image_references(monkeypatch):
     assert len(images) == 1
     assert images[0]["filename"] == "render.png"
     assert images[0]["url"] == "/api/creative/comfyui/view/prompt-123/render.png"
+
+
+
+def test_founder_selfdev_creates_isolated_github_pull_request(monkeypatch):
+    import io
+    import json
+    import urllib.error
+    import creative_runtime
+    import app as mod
+
+    monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
+    monkeypatch.setenv("ELYNTRO_SELFDEV_ENABLED", "true")
+    monkeypatch.setenv("ELYNTRO_GITHUB_TOKEN", "scoped-test-token")
+    monkeypatch.setenv("ELYNTRO_GITHUB_REPOSITORY", "JejeStudio-web/elyntro-prototype")
+    monkeypatch.setenv("ELYNTRO_GITHUB_BASE_BRANCH", "main")
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, limit=-1):
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, timeout=0):
+        calls.append((request.get_method(), request.full_url))
+        method, url = request.get_method(), request.full_url
+        if method == "GET" and url.endswith("/git/ref/heads/main"):
+            return FakeResponse({"object": {"sha": "a" * 40}})
+        if method == "POST" and url.endswith("/git/refs"):
+            return FakeResponse({"ref": "refs/heads/elyntro-selfdev-test"})
+        if method == "GET" and "/contents/docs/new-note.md?" in url:
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, io.BytesIO(b""))
+        if method == "PUT" and url.endswith("/contents/docs/new-note.md"):
+            return FakeResponse({"content": {"sha": "b" * 40}})
+        if method == "POST" and url.endswith("/pulls"):
+            return FakeResponse({"number": 777, "html_url": "https://github.com/JejeStudio-web/elyntro-prototype/pull/777", "state": "open", "draft": True})
+        raise AssertionError("Unexpected GitHub API call: " + method + " " + url)
+
+    monkeypatch.setattr(creative_runtime.urllib.request, "urlopen", fake_urlopen)
+    response = mod.app.test_client().post(
+        "/api/creative/founder/selfdev/pull-request",
+        headers={"Authorization": "Bearer founder-secret"},
+        json={"goal": "Improve docs", "title": "Improve generated docs", "rationale": "Test isolated PR flow",
+              "files": [{"path": "docs/new-note.md", "content": "# New note\n"}]},
+    )
+    body = response.get_json()
+    assert response.status_code == 201
+    assert body["pull_request"]["number"] == 777
+    assert body["pull_request"]["draft"] is True
+    assert body["branch"].startswith("elyntro-selfdev-")
+    assert ("POST", "https://api.github.com/repos/JejeStudio-web/elyntro-prototype/pulls") in calls
+
+
+def test_founder_selfdev_rejects_sensitive_paths_before_github_access(monkeypatch):
+    import app as mod
+    monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
+    monkeypatch.setenv("ELYNTRO_SELFDEV_ENABLED", "true")
+    response = mod.app.test_client().post(
+        "/api/creative/founder/selfdev/pull-request",
+        headers={"Authorization": "Bearer founder-secret"},
+        json={"goal": "Change deployment", "title": "Change deployment", "rationale": "Not allowed",
+              "files": [{"path": "render.yaml", "content": "services: []"}]},
+    )
+    assert response.status_code == 400
+
+
+def test_founder_selfdev_is_disabled_without_explicit_opt_in(monkeypatch):
+    import app as mod
+    monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
+    monkeypatch.delenv("ELYNTRO_SELFDEV_ENABLED", raising=False)
+    response = mod.app.test_client().post(
+        "/api/creative/founder/selfdev/pull-request",
+        headers={"Authorization": "Bearer founder-secret"},
+        json={"goal": "Change docs", "title": "Change docs", "rationale": "Test", "files": [{"path": "docs/a.md", "content": "x"}]},
+    )
+    assert response.status_code == 503
