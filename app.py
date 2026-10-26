@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from elyntro_api_v1 import api_v1
+from studio_api import studio_api
 from werkzeug.middleware.proxy_fix import ProxyFix
 from elyntro import CognitiveLoop, EvidenceVerifier
 from elyntro.contracts import TaskRequest
@@ -48,6 +49,7 @@ def resolve_db_path() -> Path:
 DB_PATH = str(resolve_db_path())
 app = Flask(__name__, static_folder="static")
 app.register_blueprint(api_v1)
+app.register_blueprint(studio_api)
 # Render sits behind one trusted reverse proxy; normalize client IP and HTTPS metadata.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
@@ -1071,6 +1073,11 @@ def create_task():
     task_request = TaskRequest(goal=goal.strip(), constraints=["No afirmar que se han usado modelos o fuentes que no están configurados."], success_criteria=[CRITERION])
     result = loop.run(task_request, namespace="prototype")
     return jsonify({"task": result.task.to_dict(), "task_access_token": _task_access_token(result.task.task_id), "plan": [{"step_id": s.step_id, "name": s.name, "handler_key": s.handler_key} for s in result.plan.steps] if result.plan else [], "verification": result.verification, "plan_review": result.plan_review}), 201
+
+@app.get("/studio")
+def studio_page():
+    return send_from_directory(app.static_folder, "studio.html")
+
 
 @app.get("/api/tasks/<task_id>")
 def get_task(task_id):
