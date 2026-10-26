@@ -37,3 +37,22 @@ def test_sync_never_accepts_anonymous_user_data(monkeypatch):
     response = client.put("/api/identity/sync/conversations/conversation-1",
                           json={"data": {"messages": []}})
     assert response.status_code == 503
+
+
+def test_sync_requires_an_authenticated_server_side_session(monkeypatch):
+    monkeypatch.setenv("ELYNTRO_DATABASE_URL", "postgresql://user:password@localhost/example")
+    import app
+    importlib.reload(app)
+    client = app.app.test_client()
+    response = client.put("/api/identity/sync/conversations/main",
+                          json={"data": {"messages": []}})
+    assert response.status_code == 401
+
+
+def test_sync_rejects_unknown_namespaces_before_database_access(monkeypatch):
+    monkeypatch.setenv("ELYNTRO_DATABASE_URL", "postgresql://user:password@localhost/example")
+    import app
+    importlib.reload(app)
+    client = app.app.test_client()
+    response = client.get("/api/identity/sync/admin/secrets")
+    assert response.status_code == 400
