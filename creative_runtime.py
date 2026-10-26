@@ -338,6 +338,25 @@ def founder_list_proposals():
     return jsonify({"ok": True, "proposals": proposals})
 
 
+@creative_api.get("/founder/proposals/<proposal_id>")
+def founder_get_proposal(proposal_id: str):
+    if not _authorized(founder=True):
+        return _json_error("Founder Mode requiere ELYNTRO_FOUNDER_TOKEN.", 401)
+    if not re.fullmatch(r"prop_[a-f0-9]{16}", proposal_id):
+        return _json_error("Identificador de propuesta no válido.", 400)
+    path = _proposal_root() / (proposal_id + ".json")
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _json_error("Propuesta no encontrada.", 404)
+    except (OSError, ValueError):
+        return _json_error("No se pudo leer la propuesta.", 500)
+    patch = record.get("patch")
+    if not isinstance(patch, str) or hashlib.sha256(patch.encode()).hexdigest() != record.get("patch_sha256"):
+        return _json_error("La integridad del parche no coincide con su SHA-256 registrado.", 409)
+    return jsonify({"ok": True, "proposal": record})
+
+
 @creative_api.post("/founder/proposals/<proposal_id>/review")
 def founder_review_proposal(proposal_id: str):
     if not _authorized(founder=True):
@@ -356,6 +375,13 @@ def founder_review_proposal(proposal_id: str):
         return _json_error("No se pudo leer la propuesta.", 500)
     if record.get("status") != "pending_human_review":
         return _json_error("Solo se pueden revisar propuestas pendientes.", 409)
+    patch = record.get("patch")
+    actual_hash = hashlib.sha256(patch.encode()).hexdigest() if isinstance(patch, str) else ""
+    if not actual_hash or actual_hash != record.get("patch_sha256"):
+        return _json_error("La integridad del parche no coincide con su SHA-256 registrado.", 409)
+    reviewed_hash = (request.get_json(silent=True) or {}).get("reviewed_patch_sha256")
+    if decision == "approve" and reviewed_hash != actual_hash:
+        return _json_error("Para aprobar, debes enviar el SHA-256 del parche que has revisado.", 409)
     record["status"] = "approved_for_manual_implementation" if decision == "approve" else "rejected"
     record["reviewed_at"] = int(time.time())
     record["review_decision"] = decision
