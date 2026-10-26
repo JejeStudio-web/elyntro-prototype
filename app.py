@@ -31,6 +31,7 @@ from search_providers import TavilySearchProvider, fetch_public_http, is_public_
 import external_resources
 from tool_runtime import ToolRuntime, safe_calculate
 from creative_runtime import creative_api, _authorized as _founder_authorized, save_founder_proposal
+from shared_identity import identity_api, init_identity_schema
 
 logger = logging.getLogger(__name__)
 BASE = Path(__file__).resolve().parent
@@ -50,6 +51,12 @@ DB_PATH = str(resolve_db_path())
 app = Flask(__name__, static_folder="static")
 app.register_blueprint(api_v1)
 app.register_blueprint(creative_api)
+app.register_blueprint(identity_api)
+if os.environ.get('ELYNTRO_DATABASE_URL', '').strip():
+    try:
+        init_identity_schema()
+    except Exception:
+        logger.exception('Shared identity schema initialization failed; identity routes will fail closed.')
 # Render sits behind one trusted reverse proxy; normalize client IP and HTTPS metadata.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
@@ -129,6 +136,9 @@ def _apply_api_limits():
         "/api/tasks": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/creative/founder/selfdev/pull-request": int(os.environ.get("ELYNTRO_RATE_LIMIT_SELFDEV_PER_MINUTE", "3")),
         "/api/creative/founder/proposals": int(os.environ.get("ELYNTRO_RATE_LIMIT_FOUNDER_PER_MINUTE", "10")),
+        "/api/identity/register": int(os.environ.get("ELYNTRO_RATE_LIMIT_REGISTER_PER_MINUTE", "3")),
+        "/api/identity/login": int(os.environ.get("ELYNTRO_RATE_LIMIT_LOGIN_PER_MINUTE", "8")),
+        "/api/identity/logout": int(os.environ.get("ELYNTRO_RATE_LIMIT_LOGIN_PER_MINUTE", "8")),
     }
     if request.method == "POST" and request.path.startswith("/api/creative/founder/"):
         limits.setdefault(request.path, int(os.environ.get("ELYNTRO_RATE_LIMIT_FOUNDER_PER_MINUTE", "10")))

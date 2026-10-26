@@ -66,6 +66,7 @@ def init_identity_schema() -> None:
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_elyntro_sessions_expiry ON elyntro_sessions(expires_at)")
+            cur.execute("""CREATE TABLE IF NOT EXISTS elyntro_user_data (user_id UUID NOT NULL REFERENCES elyntro_users(user_id) ON DELETE CASCADE, namespace TEXT NOT NULL, item_key TEXT NOT NULL, payload JSONB NOT NULL, version BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(user_id, namespace, item_key))""")
         db.commit()
 
 
@@ -110,6 +111,8 @@ def _unavailable():
 
 @identity_api.post("/register")
 def register():
+    if os.environ.get("ELYNTRO_REGISTRATION_ENABLED", "false").lower() != "true":
+        return jsonify({"error": "El registro público está desactivado; habilítalo explícitamente en Render."}), 403
     if not _db_ready():
         return _unavailable()
     try:
@@ -142,6 +145,9 @@ def register():
     token = _issue_session(user_id)
     response = jsonify({"user": {"user_id": user_id, "email": email}})
     response.set_cookie(SESSION_COOKIE, token, max_age=14 * 86400, httponly=True,
+                        secure=request.is_secure or os.environ.get("ELYNTRO_COOKIE_SECURE", "true").lower() == "true",
+                        samesite="Lax", path="/")
+    response.set_cookie("elyntro_csrf", secrets.token_urlsafe(32), max_age=14 * 86400, httponly=False,
                         secure=request.is_secure or os.environ.get("ELYNTRO_COOKIE_SECURE", "true").lower() == "true",
                         samesite="Lax", path="/")
     return response, 201
@@ -190,6 +196,10 @@ def me():
 
 @identity_api.post("/logout")
 def logout():
+    csrf_cookie = request.cookies.get("elyntro_csrf", "")
+    csrf_header = request.headers.get("X-Elyntro-CSRF", "")
+    if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+        return jsonify({"error": "Validación CSRF fallida"}), 403
     if not _db_ready():
         return _unavailable()
     token = request.cookies.get(SESSION_COOKIE, "")
@@ -201,4 +211,91 @@ def logout():
     response = jsonify({"ok": True})
     response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, samesite="Lax",
                            secure=request.is_secure or os.environ.get("ELYNTRO_COOKIE_SECURE", "true").lower() == "true")
+    response.delete_cookie("elyntro_csrf", path="/", httponly=False, samesite="Lax",
+                           secure=request.is_secure or os.environ.get("ELYNTRO_COOKIE_SECURE", "true").lower() == "true")
     return response
+
+ 
+@identity_api.route("/sync/<namespace>/<item_key>", methods=["GET", "PUT", "DELETE"])
+def sync_item(namespace, item_key):
+    if not _db_ready():
+        return _unavailable()
+    if namespace not in {"conversations", "memory", "artifacts", "projects", "preferences"}:
+        return jsonify({"error": "Espacio de datos no permitido"}), 400
+    if not item_key or len(item_key) > 160 or any(ord(ch) < 32 for ch in item_key):
+        return jsonify({"error": "Identificador no válido"}), 400
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Se requiere iniciar sesión"}), 401
+    if request.method in {"PUT", "DELETE"}:
+        csrf_cookie = request.cookies.get("elyntro_csrf", "")
+        csrf_header = request.headers.get("X-Elyntro-CSRF", "")
+        if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+            return jsonify({"error": "Validación CSRF fallida"}), 403
+    import json
+    if request.method == "PUT":
+        if request.content_length and request.content_length > 131072:
+            return jsonify({"error": "El elemento supera el límite de 128 KiB"}), 413
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or "data" not in payload:
+            return jsonify({"error": "Se esperaba un objeto JSON con data"}), 400
+        try:
+            encoded = json.dumps(payload["data"], ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "El contenido no es JSON válido"}), 400
+        if len(encoded.encode("utf-8")) > 131072:
+            return jsonify({"error": "El elemento supera el límite de 128 KiB"}), 413
+    try:
+        with _connect() as db:
+            with db.cursor() as cur:
+                if request.method == "GET":
+                    cur.execute("SELECT payload,version,updated_at FROM elyntro_user_data WHERE user_id=%s AND namespace=%s AND item_key=%s", (user["user_id"], namespace, item_key))
+                    row = cur.fetchone()
+                    if not row:
+                        return jsonify({"error": "No encontrado"}), 404
+                    return jsonify({"namespace": namespace, "key": item_key, "data": row[0], "version": row[1], "updated_at": row[2].isoformat()})
+                if request.method == "DELETE":
+                    cur.execute("DELETE FROM elyntro_user_data WHERE user_id=%s AND namespace=%s AND item_key=%s", (user["user_id"], namespace, item_key))
+                    db.commit()
+                    return jsonify({"ok": True, "deleted": cur.rowcount > 0})
+                expected = payload.get("expected_version")
+                if expected is not None and (not isinstance(expected, int) or expected < 1):
+                    return jsonify({"error": "expected_version no válido"}), 400
+                cur.execute("""INSERT INTO elyntro_user_data(user_id,namespace,item_key,payload,version)
+                    VALUES (%s,%s,%s,%s::jsonb,1)
+                    ON CONFLICT(user_id,namespace,item_key) DO UPDATE SET
+                    payload=EXCLUDED.payload, version=elyntro_user_data.version+1, updated_at=now()
+                    WHERE (%s::bigint IS NOT NULL AND elyntro_user_data.version=%s)
+                    RETURNING version,updated_at""", (user["user_id"], namespace, item_key, encoded, expected, expected))
+                row = cur.fetchone()
+                if not row:
+                    db.rollback()
+                    return jsonify({"error": "Conflicto de versión; vuelve a cargar antes de guardar"}), 409
+                db.commit()
+                return jsonify({"ok": True, "namespace": namespace, "key": item_key, "version": row[0], "updated_at": row[1].isoformat()})
+    except Exception:
+        current_app.logger.exception("Account-scoped sync failed")
+        return jsonify({"error": "La persistencia compartida no está disponible"}), 503
+
+@identity_api.get("/sync/<namespace>")
+def list_sync_items(namespace):
+    if not _db_ready():
+        return _unavailable()
+    if namespace not in {"conversations", "memory", "artifacts", "projects", "preferences"}:
+        return jsonify({"error": "Espacio de datos no permitido"}), 400
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Se requiere iniciar sesión"}), 401
+    try:
+        with _connect() as db:
+            with db.cursor() as cur:
+                cur.execute("""SELECT item_key,payload,version,updated_at FROM elyntro_user_data
+                               WHERE user_id=%s AND namespace=%s ORDER BY updated_at DESC LIMIT 100""",
+                            (user["user_id"], namespace))
+                rows = cur.fetchall()
+        return jsonify({"items": [{"key": row[0], "data": row[1], "version": row[2],
+                                  "updated_at": row[3].isoformat()} for row in rows]})
+    except Exception:
+        current_app.logger.exception("Account-scoped sync listing failed")
+        return jsonify({"error": "La persistencia compartida no está disponible"}), 503
+

@@ -20,6 +20,12 @@ services:
         sync: false
       - key: ELYNTRO_PLAYWRIGHT_ENABLED
         value: "false"
+      - key: ELYNTRO_DATABASE_URL
+        sync: false
+      - key: ELYNTRO_REGISTRATION_ENABLED
+        value: "false"
+      - key: ELYNTRO_COOKIE_SECURE
+        value: "true"
 
   - type: pserv
     name: elyntro-browser-worker
