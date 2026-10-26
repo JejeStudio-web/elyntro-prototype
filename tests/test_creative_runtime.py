@@ -250,3 +250,58 @@ def test_founder_selfdev_is_disabled_without_explicit_opt_in(monkeypatch):
         json={"goal": "Change docs", "title": "Change docs", "rationale": "Test", "files": [{"path": "docs/a.md", "content": "x"}]},
     )
     assert response.status_code == 503
+
+
+
+def test_creator_prefix_requires_founder_authentication(monkeypatch):
+    import app as mod
+    monkeypatch.delenv("ELYNTRO_FOUNDER_TOKEN", raising=False)
+    response = mod.app.test_client().post("/api/agent/execute", json={"goal": "[245jg&] improve the studio"})
+    assert response.status_code == 401
+    assert "Founder Mode" in response.get_json()["error"]
+
+
+def test_creator_prefix_creates_hash_addressed_proposal_without_applying(monkeypatch, tmp_path):
+    import json
+    import app as mod
+    monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
+    monkeypatch.setenv("ELYNTRO_PROPOSAL_DIR", str(tmp_path))
+    monkeypatch.setattr(mod, "_model_provider_config", lambda: {"configured": True, "provider": "test", "model": "mock"})
+    monkeypatch.setattr(mod, "_groq_messages", lambda *args, **kwargs: {
+        "text": json.dumps({
+            "title": "Improve Studio", "rationale": "Add a reviewed scene control.",
+            "plan": ["Inspect the existing scene editor.", "Implement a bounded change.", "Run regression tests."],
+            "files_to_review": ["static/creative-studio.html", "tests/test_creative_runtime.py"],
+            "patch": "diff --git a/docs/scene.md b/docs/scene.md\n--- a/docs/scene.md\n+++ b/docs/scene.md\n@@ -0,0 +1 @@\n+# Scene"
+        }), "provider": "test", "model": "mock"
+    })
+    response = mod.app.test_client().post(
+        "/api/agent/execute",
+        headers={"Authorization": "Bearer founder-secret"},
+        json={"goal": "[245jg&] improve the studio"},
+    )
+    body = response.get_json()
+    assert response.status_code == 200
+    assert body["route"] == "founder_mode"
+    assert body["founder_mode"]["status"] == "pending_human_review"
+    assert body["founder_mode"]["automatic_apply"] is False
+    assert body["founder_mode"]["tests_run"] is False
+    assert len(list(tmp_path.glob("prop_*.json"))) == 1
+
+
+def test_creator_prefix_rejects_non_diff_model_output(monkeypatch, tmp_path):
+    import json
+    import app as mod
+    monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
+    monkeypatch.setenv("ELYNTRO_PROPOSAL_DIR", str(tmp_path))
+    monkeypatch.setattr(mod, "_model_provider_config", lambda: {"configured": True, "provider": "test", "model": "mock"})
+    monkeypatch.setattr(mod, "_groq_messages", lambda *args, **kwargs: {
+        "text": json.dumps({"title": "Unsafe", "rationale": "Not a diff", "plan": [], "files_to_review": [], "patch": "just some text"})
+    })
+    response = mod.app.test_client().post(
+        "/api/agent/execute",
+        headers={"Authorization": "Bearer founder-secret"},
+        json={"goal": "[245jg&] modify source"},
+    )
+    assert response.status_code == 422
+    assert list(tmp_path.glob("prop_*.json")) == []
