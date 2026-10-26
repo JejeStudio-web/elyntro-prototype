@@ -3,7 +3,7 @@
 ## Current implementation in this branch
 
 - `/studio` serves `static/studio.html`: an interactive Three.js WebGL scene with orbit controls, resize handling, geometry switching, wireframe, animation, scale and camera reset.
-- The Studio includes a ComfyUI connection panel. Its direct browser connection is diagnostic only: CORS and reachability depend on the user's environment. Sending prompts to `/prompt` requires a valid ComfyUI API workflow graph; a natural-language prompt is not itself a valid graph.
+- The Studio includes a ComfyUI connection panel that checks `/system_stats` and can submit a user-supplied API workflow graph to `/prompt`, replacing `__ELYNTRO_PROMPT__` placeholders with the entered prompt. Browser reachability and CORS depend on the user's environment. A natural-language prompt is not itself a valid workflow graph; users must export a workflow in API format and install the required models.
 - A web-guide panel opens a URL in a separate tab and records user-authored steps. It does not inspect or control third-party pages.
 - Founder Mode produces reviewable proposals. The server endpoint `POST /api/studio/founder/proposals` returns a deterministic governance scaffold, not AI-generated code and not an applied change.
 - `GET /api/studio/status` reports whether integration settings exist without returning secrets.
