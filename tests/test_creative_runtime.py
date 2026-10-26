@@ -67,6 +67,11 @@ def test_studio_route_serves_threejs_editor():
 
 
 
+def patch_hash_for_test(patch):
+    import hashlib
+    return hashlib.sha256(patch.encode()).hexdigest()
+
+
 def test_founder_proposals_can_be_listed_and_reviewed_without_applying(monkeypatch, tmp_path):
     import app as mod
     monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
@@ -83,6 +88,9 @@ def test_founder_proposals_can_be_listed_and_reviewed_without_applying(monkeypat
     listed = client.get("/api/creative/founder/proposals", headers=headers)
     assert listed.status_code == 200
     assert listed.get_json()["proposals"][0]["id"] == proposal_id
+    details = client.get(f"/api/creative/founder/proposals/{proposal_id}", headers=headers)
+    assert details.status_code == 200
+    assert details.get_json()["proposal"]["patch_sha256"] == patch_hash_for_test(details.get_json()["proposal"]["patch"])
 
     missing_review_hash = client.post(f"/api/creative/founder/proposals/{proposal_id}/review",
                                         headers=headers, json={"decision": "approve"})
