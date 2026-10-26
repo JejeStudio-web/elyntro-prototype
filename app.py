@@ -1101,11 +1101,13 @@ def get_artifact(task_id, name):
             return app.response_class(content, mimetype=artifact.get("media_type", "text/plain"))
     return jsonify({"error": "Artefacto no encontrado."}), 404
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=False)
 
 
 @app.get("/creative-studio")
 def creative_studio():
     """Serve the browser-side Three.js scene editor."""
     return send_from_directory(app.static_folder, "creative-studio.html")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=False)
