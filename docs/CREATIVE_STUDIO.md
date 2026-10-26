@@ -33,7 +33,7 @@ Playwright's Python package alone does not install the Chromium runtime. On host
 
 1. Run ComfyUI in an environment reachable from Elyntro and review its network exposure.
 2. Export a workflow in ComfyUI's API format, not the ordinary UI workflow format.
-3. Paste the JSON into the Studio workflow field. The API replaces the positive `CLIPTextEncode.inputs.text` prompt nodes with the prompt entered in Elyntro.
+3. Use “Cargar plantilla básica” to insert a standard checkpoint → sampler → SaveImage API workflow, or paste your own API-format JSON. Replace `REPLACE_WITH_INSTALLED_CHECKPOINT.safetensors` with the exact checkpoint filename installed in ComfyUI. The API replaces the positive `CLIPTextEncode.inputs.text` prompt nodes with the prompt entered in Elyntro.
 4. Submit, then query the returned job ID after the workflow finishes.
 5. The image proxy only serves output images found in that job's ComfyUI history and limits each image response to 8 MB.
 
