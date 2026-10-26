@@ -50,3 +50,19 @@ jobs:
           node --check /tmp/elyntro-studio.mjs
       - name: Run tests
         run: python -m pytest -q
+
+  build-browser-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build isolated Playwright worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.browser-worker
+          push: false
+          tags: elyntro-browser-worker:ci
