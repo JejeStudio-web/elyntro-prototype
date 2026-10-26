@@ -662,9 +662,10 @@
         if (!response.ok || !data.ok) throw new Error("API no disponible");
         dot.classList.add("online");
         $("health-label").textContent = "API disponible";
-        $("model-label").textContent = data.model_provider === "groq_configured"
-          ? `Groq configurado · ${data.model || "modelo no indicado"}`
-          : "Groq no configurado";
+        const providerName = String(data.model_provider || "Proveedor").replace(/[^a-z0-9_-]/gi, "").slice(0, 40);
+        $("model-label").textContent = data.model_configured
+          ? `${providerName} configurado · ${data.model || "modelo no indicado"}`
+          : `${providerName} no configurado`;
       } catch {
         dot.classList.remove("online");
         $("health-label").textContent = "API no disponible";

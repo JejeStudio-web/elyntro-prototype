@@ -46,21 +46,80 @@ def test_chat_completions_returns_openai_compatible_response(monkeypatch):
     assert body["elyntro"]["provider"] == "groq"
 
 
-def test_chat_completions_rejects_streaming_and_unknown_models(monkeypatch):
+def test_chat_completions_supports_streaming_and_rejects_unknown_models(monkeypatch):
+    import elyntro_api_v1 as api
     import app as mod
+
     monkeypatch.setenv("ELYNTRO_API_KEY", "test-client-key")
     monkeypatch.setenv("ELYNTRO_MODEL_PROVIDER", "ollama")
     monkeypatch.setenv("ELYNTRO_MODEL_BASE_URL", "http://127.0.0.1:11434/v1")
     monkeypatch.setenv("ELYNTRO_MODEL", "local-test")
+
+    class StreamResponse:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def __iter__(self):
+            yield b'data: {"id":"x","choices":[{"delta":{"content":"ok"}}]}\n'
+            yield b'\n'
+            yield b'data: [DONE]\n'
+            yield b'\n'
+    monkeypatch.setattr(api, "urlopen", lambda request, timeout: StreamResponse())
     client = mod.app.test_client()
     headers = {"Authorization": "Bearer test-client-key"}
     messages = [{"role": "user", "content": "test"}]
-    streaming = client.post("/api/v1/chat/completions", headers=headers, json={"messages": messages, "stream": True})
-    unknown = client.post("/api/v1/chat/completions", headers=headers, json={"messages": messages, "model": "other-model"})
-    assert streaming.status_code == 400
-    assert streaming.get_json()["error"]["code"] == "streaming_not_supported"
+    streaming = client.post("/api/v1/chat/completions", headers=headers,
+                            json={"messages": messages, "stream": True})
+    unknown = client.post("/api/v1/chat/completions", headers=headers,
+                          json={"messages": messages, "model": "other-model"})
+
+    assert streaming.status_code == 200
+    assert streaming.mimetype == "text/event-stream"
+    assert "data: [DONE]" in streaming.get_data(as_text=True)
     assert unknown.status_code == 400
     assert unknown.get_json()["error"]["code"] == "model_not_available"
+
+
+def test_chat_completions_accepts_bounded_base64_image_parts(monkeypatch):
+    import elyntro_api_v1 as api
+    import app as mod
+
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-client-key")
+    monkeypatch.setenv("ELYNTRO_MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("ELYNTRO_MODEL_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setenv("ELYNTRO_MODEL", "vision-local")
+    observed = {}
+
+    class ProviderResponse:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, limit):
+            return json.dumps({"id": "vision-test", "model": "vision-local",
+                "choices": [{"message": {"role": "assistant", "content": "Veo una imagen"}}]}).encode()
+
+    def fake_urlopen(request, timeout):
+        observed["body"] = json.loads(request.data.decode("utf-8"))
+        return ProviderResponse()
+    monkeypatch.setattr(api, "urlopen", fake_urlopen)
+    response = mod.app.test_client().post("/api/v1/chat/completions",
+        headers={"Authorization": "Bearer test-client-key"},
+        json={"messages": [{"role": "user", "content": [
+            {"type": "text", "text": "Describe esta imagen"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGVsbG8=", "detail": "low"}}
+        ]}]})
+    assert response.status_code == 200
+    assert observed["body"]["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_chat_completions_rejects_remote_image_urls(monkeypatch):
+    import app as mod
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-client-key")
+    response = mod.app.test_client().post("/api/v1/chat/completions",
+        headers={"Authorization": "Bearer test-client-key"},
+        json={"messages": [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
+        ]}]})
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "invalid_image"
 
 def test_ollama_adapter_calls_configured_openai_compatible_endpoint(monkeypatch):
     import app as mod

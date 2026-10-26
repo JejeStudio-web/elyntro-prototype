@@ -2,19 +2,20 @@
 
 This module deliberately does not expose a public, unauthenticated proxy to a
 provider credential. Configure ELYNTRO_API_KEY and a model provider before use.
-Streaming and multimodal payloads are rejected explicitly until implemented.
+Streaming and bounded image inputs are supported where the configured provider/model allows them; audio/video are not yet supported.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import time
 import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 MAX_MESSAGES = 20
@@ -57,6 +58,54 @@ def _authorized():
     return bool(supplied and secrets.compare_digest(supplied, expected)), "Credencial de API no válida."
 
 
+def _stream_completion(config, body):
+    """Yield provider SSE events without buffering the complete answer."""
+    body = dict(body)
+    body["stream"] = True
+    http_request = Request(
+        config["base_url"] + "/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "text/event-stream",
+                 "User-Agent": "Elyntro/1.1"},
+        method="POST",
+    )
+    if config["api_key"]:
+        http_request.add_unredirected_header("Authorization", "Bearer " + config["api_key"])
+
+    @stream_with_context
+    def generate():
+        try:
+            with urlopen(http_request, timeout=45) as upstream:
+                for raw_line in upstream:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        yield "data: [DONE]\\n\\n"
+                        return
+                    try:
+                        parsed = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(parsed, dict):
+                        yield "data: " + json.dumps(parsed, ensure_ascii=False, separators=(",", ":")) + "\\n\\n"
+            yield "data: [DONE]\\n\\n"
+        except HTTPError as exc:
+            error = {"error": {"message": "El proveedor rechazó la solicitud durante el streaming",
+                               "type": "provider_error", "status": exc.code}}
+            yield "data: " + json.dumps(error, ensure_ascii=False) + "\\n\\n"
+            yield "data: [DONE]\\n\\n"
+        except (URLError, TimeoutError, OSError):
+            error = {"error": {"message": "Se perdió la conexión con el proveedor durante el streaming",
+                               "type": "provider_connection_error"}}
+            yield "data: " + json.dumps(error, ensure_ascii=False) + "\\n\\n"
+            yield "data: [DONE]\\n\\n"
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
 def _error(message, status, code, retryable=False):
     error_id = uuid.uuid4().hex
     return jsonify({
@@ -85,7 +134,7 @@ def models():
         return _error("El proveedor no está configurado. Revisa la clave, el modelo y la URL base.", 503, "provider_not_configured")
     return jsonify({"object": "list", "data": [{
         "id": config["model"], "object": "model", "owned_by": config["provider"],
-        "capabilities": {"chat_completions": True, "streaming": False, "vision": False, "audio": False}
+        "capabilities": {"chat_completions": True, "streaming": True, "vision": "provider-dependent", "audio": False, "video": False}
     }]})
 
 
@@ -99,8 +148,9 @@ def chat_completions():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return _error("El cuerpo debe ser un objeto JSON.", 400, "invalid_json")
-    if payload.get("stream") is True:
-        return _error("stream=true no está implementado; usa stream=false u omite el campo.", 400, "streaming_not_supported")
+    stream_requested = payload.get("stream", False)
+    if not isinstance(stream_requested, bool):
+        return _error("stream debe ser booleano.", 400, "invalid_stream")
     if payload.get("tools") or payload.get("functions"):
         return _error("Las llamadas a herramientas no forman parte de este endpoint todavía.", 400, "tools_not_supported")
     messages = payload.get("messages")
@@ -110,14 +160,34 @@ def chat_completions():
     total_chars = 0
     for item in messages:
         if not isinstance(item, dict) or item.get("role") not in {"system", "user", "assistant"}:
-            return _error("Cada mensaje debe tener role system, user o assistant y contenido de texto.", 400, "invalid_message")
-        value = item.get("content")
-        if not isinstance(value, str):
-            return _error("Solo se admite contenido de texto; imágenes y audio aún no están soportados.", 400, "multimodal_not_supported")
-        total_chars += len(value)
+            return _error("Cada mensaje debe tener role system, user o assistant.", 400, "invalid_message")
+        role, value = item["role"], item.get("content")
+        if isinstance(value, str):
+            total_chars += len(value)
+        elif isinstance(value, list) and role == "user":
+            if not value or len(value) > 12:
+                return _error("El contenido multimodal debe tener entre 1 y 12 partes.", 400, "invalid_message")
+            for part in value:
+                if not isinstance(part, dict) or part.get("type") not in {"text", "image_url"}:
+                    return _error("Solo se admiten partes de texto e imagen.", 400, "multimodal_not_supported")
+                if part["type"] == "text":
+                    if set(part) != {"type", "text"} or not isinstance(part.get("text"), str):
+                        return _error("Parte de texto no válida.", 400, "invalid_message")
+                    total_chars += len(part["text"])
+                else:
+                    image = part.get("image_url")
+                    if set(part) != {"type", "image_url"} or not isinstance(image, dict) or set(image) - {"url", "detail"}:
+                        return _error("Parte de imagen no válida.", 400, "invalid_message")
+                    image_url = image.get("url")
+                    if not isinstance(image_url, str) or not re.fullmatch(r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}", image_url):
+                        return _error("Las imágenes deben ser data URL base64 PNG, JPEG o WebP; no se admiten URLs remotas.", 400, "invalid_image")
+                    if image.get("detail", "auto") not in {"auto", "low", "high"}:
+                        return _error("Nivel de detalle de imagen no válido.", 400, "invalid_image")
+        else:
+            return _error("content debe ser texto o una lista de partes de texto/imagen en un mensaje user.", 400, "invalid_message")
         if total_chars > MAX_CONTENT_CHARS:
-            return _error("El contenido total supera el límite de 12.000 caracteres.", 413, "content_too_large")
-        clean_messages.append({"role": item["role"], "content": value})
+            return _error("El texto total supera el límite de 12.000 caracteres.", 413, "content_too_large")
+        clean_messages.append({"role": role, "content": value})
     config = _config()
     if not config["supported"]:
         return _error("Proveedor no compatible. Usa groq, openai, ollama u openai-compatible.", 503, "provider_unsupported")
@@ -146,6 +216,8 @@ def chat_completions():
             return _error("response_format admite text o json_object.", 400, "invalid_response_format")
         if response_format.get("type") == "json_object":
             body["response_format"] = {"type": "json_object"}
+    if stream_requested:
+        return _stream_completion(config, body)
     request_id = "chatcmpl-" + uuid.uuid4().hex
     http_request = Request(
         config["base_url"] + "/chat/completions",
