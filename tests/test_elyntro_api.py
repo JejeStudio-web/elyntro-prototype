@@ -75,6 +75,7 @@ def test_chat_completions_supports_streaming_and_rejects_unknown_models(monkeypa
     assert streaming.status_code == 200
     assert streaming.mimetype == "text/event-stream"
     assert "data: [DONE]" in streaming.get_data(as_text=True)
+    assert "data: [DONE]\n\n" in streaming.get_data(as_text=True)
     assert unknown.status_code == 400
     assert unknown.get_json()["error"]["code"] == "model_not_available"
 
