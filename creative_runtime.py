@@ -288,6 +288,16 @@ def browser_act():
                 if action["type"] == "scroll":
                     page.evaluate("(direction) => window.scrollBy(0, direction === 'down' ? Math.min(window.innerHeight * 0.8, 640) : -Math.min(window.innerHeight * 0.8, 640))", action["direction"])
                     completed.append({"type": "scroll", "direction": action["direction"], "ok": True})
+                elif action["type"] == "hover_text":
+                    page.get_by_text(action["text"].strip(), exact=True).first.hover(timeout=3000)
+                    completed.append({"type": "hover_text", "text": action["text"].strip(), "ok": True})
+                elif action["type"] == "click_button":
+                    locator = page.get_by_role("button", name=action["text"].strip(), exact=True).first
+                    safe = locator.evaluate("(el) => !el.disabled && el.type !== 'submit' && !el.closest('form') && !el.hasAttribute('download')")
+                    if not safe:
+                        raise ValueError("El botón está deshabilitado o forma parte de un formulario.")
+                    locator.click(timeout=3000)
+                    completed.append({"type": "click_button", "text": action["text"].strip(), "ok": True})
                 else:
                     locator = page.get_by_role("link", name=action["text"].strip(), exact=True).first
                     locator.click(timeout=3000)
@@ -297,10 +307,11 @@ def browser_act():
                         raise ValueError("La navegación intentó salir de la allowlist.")
                     completed.append({"type": "click_link", "text": action["text"].strip(), "ok": True, "url": page.url})
             snapshot = page.evaluate("""() => ({title: document.title.slice(0,300), url: location.href, text: (document.body?.innerText || '').slice(0,12000)})""")
+            screenshot = base64.b64encode(page.screenshot(type="jpeg", quality=45, full_page=False)).decode("ascii")
             browser.close()
     except Exception as exc:
         return jsonify({"ok": False, "error": "La sesión de navegador no pudo completar todas las acciones.", "detail": type(exc).__name__, "actions_completed": completed}), 502
-    return jsonify({"ok": True, "mode": "ephemeral_allowlisted", "actions_completed": completed, "snapshot": snapshot})
+    return jsonify({"ok": True, "mode": "ephemeral_allowlisted", "actions_completed": completed, "snapshot": snapshot, "screenshot_data_url": "data:image/jpeg;base64," + screenshot})
 
 
 def _proposal_root() -> Path:
