@@ -1,3 +1,5 @@
 # Install separately from the lightweight web service requirements.
-# Choose a PyTorch wheel compatible with your hardware.
+# Select a PyTorch wheel suitable for available CPU/CUDA/Apple Silicon hardware.
 torch>=2.2,<3.0
+datasets>=3.0,<5.0
+huggingface_hub>=0.26,<2.0
