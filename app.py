@@ -184,7 +184,7 @@ def _groq_chat(goal: str, direct: bool = False) -> dict:
     config = _model_provider_config()
     if not config["configured"]:
         return {"configured": False, "text": None, "model": None,
-                "error": "El proveedor de modelos de Elyntro no está configurado.",
+                "error": (config["api_key_env"] + " no está configurada.") if config["provider"] in {"groq", "openai"} else "El proveedor de modelos de Elyntro no está configurado.",
                 "error_code": "provider_not_configured", "retryable": False,
                 "provider": config["provider"]}
     system_prompt = ("Eres Elyntro. Responde en español con precisión y sigue el formato solicitado. "
