@@ -28,7 +28,7 @@ def test_web_open_returns_bounded_page_text_for_allowed_public_url(monkeypatch):
 
     assert result["ok"] is True
     assert result["page"]["title"] == "Página de prueba"
-    assert "dato no confiable" in result["summary"]
+    assert "evidencia no confiable" in result["summary"]
 
 
 def test_tool_agent_advertises_page_opening_capability(monkeypatch):
