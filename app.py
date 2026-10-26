@@ -180,12 +180,21 @@ def handle_research(inputs, context):
     )
 
 def _groq_chat(goal: str, direct: bool = False) -> dict:
+    """Backward-compatible direct-chat adapter routed through Elyntro model gateway."""
     config = _model_provider_config()
-    if not config['configured']:
-        return {'configured': False, 'text': None, 'model': None, 'error': 'El proveedor de modelos de Elyntro no está configurado.', 'error_code': 'provider_not_configured', 'retryable': False, 'provider': config['provider']}
-    system_prompt = 'Eres Elyntro. Responde en español con precisión y no inventes acciones ni fuentes.'
-    result = _groq_messages([{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': goal}], max_tokens=300 if direct else 1200, temperature=0.2)
-    return {'configured': True, **result, 'provider': result.get('provider', config['provider'])}
+    if not config["configured"]:
+        return {"configured": False, "text": None, "model": None,
+                "error": "El proveedor de modelos de Elyntro no está configurado.",
+                "error_code": "provider_not_configured", "retryable": False,
+                "provider": config["provider"]}
+    system_prompt = ("Eres Elyntro. Responde en español con precisión y sigue el formato solicitado. "
+                     "No inventes acciones ni fuentes.")
+    result = _groq_messages(
+        [{"role": "system", "content": system_prompt}, {"role": "user", "content": goal}],
+        max_tokens=300 if direct else 1200, temperature=0.2,
+    )
+    return {"configured": True, **result, "provider": result.get("provider", config["provider"])}
+
 
 def handle_analyze(inputs, context):
     goal = str(inputs.get("goal", ""))
@@ -368,19 +377,153 @@ def health():
     search_configured = search_provider == "duckduckgo" or (
         search_provider == "tavily" and bool(os.environ.get("TAVILY_API_KEY", "").strip())
     )
-    model_config = _model_provider_config()
     return jsonify({
         "ok": True,
-        "prototype": "1.2.0",
+        "prototype": "1.1.0",
         "engine": "6.2.0",
         "database_path": str(resolve_db_path()),
-        "model_provider": model_config["provider"] if model_config["configured"] else "not_configured",
-        "model": model_config.get("model") if model_config["configured"] else None,
-        "model_configured": model_config["configured"],
+        "model_provider": "groq_configured" if os.environ.get("GROQ_API_KEY", "").strip() else "not_configured",
+        "model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b") if os.environ.get("GROQ_API_KEY", "").strip() else None,
         "external_research": f"{search_provider}_best_effort",
         "search_provider": search_provider,
         "search_provider_configured": search_configured,
     })
+
+def classify_request(goal: str) -> str:
+    """Conservative server-side intent routing; never presented as an LLM capability."""
+    text = goal.casefold().strip()
+    artifact_verbs = ("crea ", "crear ", "genera ", "generar ", "escribe ", "redacta ",
+                      "diseña ", "diseñar ", "construye ", "construir ", "haz ", "prepara ",
+                      "preparar ", "desarrolla ", "desarrollar ", "programa ", "programar ", "haz una página", "haz una pagina", "haz una web", "haz un documento", "haz un resumen")
+    research_words = ("investiga", "busca información", "fuentes", "bibliografía", "referencias")
+    analyze_words = ("analiza", "analizar", "evalúa", "evaluar", "compara", "comparar", "planifica", "planificar", "estrategia", "audita", "revisa el código")
+    if any(w in text for w in research_words):
+        return "research"
+    if any(w in text for w in artifact_verbs):
+        return "create"
+    if any(w in text for w in analyze_words):
+        return "analyze"
+    return "chat"
+
+def _model_provider_config():
+    """Resolve the configured model backend without exposing credentials."""
+    provider = os.environ.get("ELYNTRO_MODEL_PROVIDER", "groq").strip().casefold()
+    configs = {
+        "groq": {
+            "base_url": "https://api.groq.com/openai/v1",
+            "api_key_env": "GROQ_API_KEY",
+            "model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b").strip(),
+            "requires_key": True,
+        },
+        "openai": {
+            "base_url": "https://api.openai.com/v1",
+            "api_key_env": "OPENAI_API_KEY",
+            "model": os.environ.get("OPENAI_MODEL", "gpt-4.1-mini").strip(),
+            "requires_key": True,
+        },
+        "ollama": {
+            "base_url": os.environ.get("ELYNTRO_MODEL_BASE_URL", "http://127.0.0.1:11434/v1").strip(),
+            "api_key_env": "ELYNTRO_MODEL_API_KEY",
+            "model": os.environ.get("ELYNTRO_MODEL", os.environ.get("OLLAMA_MODEL", "")).strip(),
+            "requires_key": False,
+        },
+        "openai-compatible": {
+            "base_url": os.environ.get("ELYNTRO_MODEL_BASE_URL", "").strip(),
+            "api_key_env": "ELYNTRO_MODEL_API_KEY",
+            "model": os.environ.get("ELYNTRO_MODEL", "").strip(),
+            "requires_key": False,
+        },
+    }
+    config = configs.get(provider)
+    if config is None:
+        return {"provider": provider, "configured": False, "error": "provider_unsupported"}
+    api_key = os.environ.get(config["api_key_env"], "").strip()
+    configured = bool(config["base_url"] and config["model"] and
+                      (api_key or not config["requires_key"]))
+    return {
+        "provider": provider,
+        "base_url": config["base_url"].rstrip("/"),
+        "api_key_env": config["api_key_env"],
+        "api_key": api_key,
+        "model": config["model"],
+        "configured": configured,
+        "error": None if configured else ("provider_not_configured" if config["base_url"] else "provider_base_url_missing"),
+    }
+
+
+def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=False):
+    """Legacy-compatible name for Elyntro's provider-neutral model adapter."""
+    config = _model_provider_config()
+    if not config["configured"]:
+        provider = config["provider"]
+        if config.get("error") == "provider_unsupported":
+            message = "ELYNTRO_MODEL_PROVIDER no corresponde a un proveedor compatible."
+        elif config.get("error") == "provider_base_url_missing":
+            message = "Configura ELYNTRO_MODEL_BASE_URL para el proveedor compatible."
+        else:
+            message = f"El proveedor {provider} no está configurado; revisa su clave, URL y modelo."
+        return {"text": None, "error": message, "error_code": "provider_not_configured", "retryable": False,
+                "provider": provider}
+    api_key = config["api_key"]
+    model = config["model"]
+    body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    req = urllib.request.Request(
+        config["base_url"] + "/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "User-Agent": "Elyntro/1.0 (+https://github.com/JejeStudio-web/elyntro-prototype)"},
+        method="POST")
+    if api_key:
+        req.add_unredirected_header("Authorization", f"Bearer {api_key}")
+    try:
+        with urllib.request.urlopen(req, timeout=55) as response:
+            raw_response = response.read().decode("utf-8")
+        try:
+            data = json.loads(raw_response)
+        except (ValueError, TypeError):
+            return {"text": None, "error": "El proveedor devolvió JSON no válido.",
+                    "error_code": "provider_invalid_json", "retryable": False, "provider": config["provider"]}
+        try:
+            text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            return {"text": None, "error": "La respuesta del proveedor tenía una estructura inesperada.",
+                    "error_code": "provider_invalid_response", "retryable": False, "provider": config["provider"]}
+        if not isinstance(text, str) or not text.strip():
+            return {"text": None, "error": "El proveedor devolvió una respuesta vacía.",
+                    "error_code": "provider_empty_response", "retryable": True, "provider": config["provider"]}
+        return {"text": text.strip(), "model": data.get("model") or model,
+                "requested_model": model, "response_id": data.get("id"), "usage": data.get("usage"),
+                "provider": config["provider"]}
+    except urllib.error.HTTPError as exc:
+        try:
+            raw = exc.read(2048).decode("utf-8", errors="replace")
+            parsed = json.loads(raw)
+            err = parsed.get("error", {}) if isinstance(parsed, dict) else {}
+            detail = err.get("message", "") if isinstance(err, dict) else str(err)
+        except Exception:
+            detail = ""
+        detail = str(detail).replace(api_key, "[clave oculta]") if api_key else str(detail)
+        detail = re.sub(r"(?i)(bearer\\s+)[^\\s,;]+", r"\\1[oculto]", detail)
+        detail = re.sub(r"(?i)(gsk_[A-Za-z0-9_-]{8,})", "[clave oculta]", detail)[:450]
+        error_code = (
+            "provider_authentication_failed" if exc.code == 401 else
+            "provider_permission_denied" if exc.code == 403 else
+            "provider_rate_limited" if exc.code == 429 else
+            "provider_unavailable" if exc.code >= 500 else
+            "provider_http_error"
+        )
+        return {"text": None, "error": f"El proveedor {config['provider']} devolvió HTTP {exc.code}" + (f": {detail}" if detail else ""),
+                "error_code": error_code, "retryable": exc.code == 429 or exc.code >= 500,
+                "provider": config["provider"]}
+    except (urllib.error.URLError, TimeoutError) as exc:
+        timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+        return {"text": None,
+                "error": "El proveedor agotó el tiempo de espera." if timed_out else "No se pudo conectar con el proveedor.",
+                "error_code": "provider_timeout" if timed_out else "provider_connection_failed",
+                "retryable": True, "provider": config["provider"]}
+
 
 @app.get("/api/v1/models")
 def api_v1_models():
