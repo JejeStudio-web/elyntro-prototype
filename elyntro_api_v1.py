@@ -175,16 +175,29 @@ def chat_completions():
         return _error("La respuesta del proveedor tiene una estructura inesperada.", 502, "provider_invalid_response")
     if not isinstance(answer, str):
         return _error("El proveedor devolvió contenido no textual, no soportado por esta API.", 502, "provider_invalid_response")
+    if not answer.strip():
+        return _error("El proveedor devolvió una respuesta vacía.", 502, "provider_empty_response", retryable=True)
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-    returned_model = data.get("model") if isinstance(data.get("model"), str) else config["model"]
+
+    def _safe_usage_int(value):
+        # Provider usage metadata is untrusted input; keep the public schema numeric.
+        if isinstance(value, bool):
+            return 0
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        return max(0, min(parsed, 2**31 - 1))
+
+    returned_model = data.get("model") if isinstance(data.get("model"), str) and data.get("model").strip() else config["model"]
     return jsonify({
         "id": request_id, "object": "chat.completion", "created": int(time.time()),
         "model": returned_model,
         "choices": [{"index": 0, "message": {"role": "assistant", "content": answer},
                      "finish_reason": finish_reason}],
-        "usage": {"prompt_tokens": usage.get("prompt_tokens", 0),
-                  "completion_tokens": usage.get("completion_tokens", 0),
-                  "total_tokens": usage.get("total_tokens", 0)},
+        "usage": {"prompt_tokens": _safe_usage_int(usage.get("prompt_tokens", 0)),
+                  "completion_tokens": _safe_usage_int(usage.get("completion_tokens", 0)),
+                  "total_tokens": _safe_usage_int(usage.get("total_tokens", 0))},
         "elyntro": {"provider": config["provider"], "latency_ms": int((time.monotonic() - started) * 1000),
                     "streaming": False, "multimodal": False}
     })
