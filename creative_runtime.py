@@ -62,9 +62,15 @@ def creative_status():
                         "reason": None if _comfy_base() else "Configura COMFYUI_BASE_URL en el entorno donde se ejecuta ComfyUI o Elyntro."},
             "playwright": {"available": _playwright_available(), "enabled": os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() == "true"},
             "founder_mode": {"available": bool(os.getenv("ELYNTRO_FOUNDER_TOKEN", "").strip()), "proposal_only": True},
-            "self_modification": {"mode": "reviewable_proposals_only", "automatic_apply": False},
+            "self_modification": {
+                "mode": "reviewable_proposals_and_optional_draft_pr",
+                "automatic_apply": False,
+                "github_pr_creation_enabled": os.getenv("ELYNTRO_SELFDEV_ENABLED", "").lower() == "true"
+                    and bool(os.getenv("ELYNTRO_GITHUB_TOKEN", "").strip())
+                    and bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", os.getenv("ELYNTRO_GITHUB_REPOSITORY", "").strip())),
+            },
         },
-        "security": {"browser_navigation": "public-http(s)-only; allowlist required", "self_modification": "never auto-applies code"}
+        "security": {"browser_navigation": "public-http(s)-only; allowlist required", "self_modification": "branch and draft PR only; never auto-merges or deploys"}
     })
 
 
