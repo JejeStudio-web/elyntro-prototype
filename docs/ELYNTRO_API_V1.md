@@ -93,3 +93,17 @@ or per-account quota management. Do not embed it in frontend JavaScript.
 - Streaming, image/audio/video payloads, user-account authentication, per-account quotas, persistent usage billing, and API-key issuance are not implemented by this step.
 - The API is an Elyntro-controlled gateway; it does not make external model weights proprietary to Elyntro.
 - Existing application calls now use the same configured provider adapter for ordinary chat, model-assisted artifact creation, and model-assisted routing.
+
+
+## Streaming and image inputs
+
+`POST /api/v1/chat/completions` supports `stream: true` via upstream
+Server-Sent Events when the selected provider supports streaming. Clients must
+read `data:` events until `[DONE]`; an error occurring after the stream starts
+is delivered as an SSE error event.
+
+User messages may contain text parts and image parts in OpenAI-compatible
+`image_url` format, but image URLs must be bounded base64 data URLs for PNG,
+JPEG, or WebP. Remote URLs are rejected. Image support depends on the configured
+model/provider; this API cannot add vision to a text-only model. Audio and video
+input are not supported by this version.
