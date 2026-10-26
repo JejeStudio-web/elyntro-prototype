@@ -119,3 +119,12 @@ Run the commands from the repository root. The test count is intentionally not h
 - [static/index.html](static/index.html)
 - [tests/test_engine_integration.py](tests/test_engine_integration.py)
 - [elyntro-engine-v6.2.0/elyntro](elyntro-engine-v6.2.0/elyntro)
+
+
+## Creative Studio, browser guidance, and Founder Mode
+
+The optional visual workspace is available at `/creative-studio`. It uses Three.js/WebGL in the browser and supports primitive editing, camera movement, per-object transforms, local scene persistence and JSON export. The Studio can submit an operator-provided ComfyUI API workflow and display generated outputs, and can request read-only page snapshots plus constrained Playwright guidance actions when explicitly enabled.
+
+See [docs/CREATIVE_STUDIO.md](docs/CREATIVE_STUDIO.md) for configuration, endpoint contracts, threat boundaries, and setup. Playwright dependencies are intentionally separate in [requirements-creative.txt](requirements-creative.txt) so the base Render build does not install a browser automatically.
+
+Founder Mode is a governed self-development workflow. A prompt beginning with `[245jg&]` requires the server-side creator token, asks the configured model to inspect bounded local source context and stores a hash-addressed unified-diff proposal. The proposal must be reviewed before manual implementation. With `ELYNTRO_SELFDEV_ENABLED=true` and a narrowly scoped GitHub token configured, the Studio can also commit supplied allowlisted file contents to a separate branch and open a draft pull request. It never merges, executes proposed code, or deploys. Use durable storage for proposal records, branch protection and human review.

@@ -222,6 +222,7 @@
           <button class="active" type="button" aria-current="page"><span class="nav-icon">◈</span> Asistente</button>
           <button type="button" data-prompt="Investiga fuentes sobre "><span class="nav-icon">⌕</span> Investigación</button>
           <button type="button" data-prompt="Analiza esta idea: "><span class="nav-icon">⌁</span> Análisis</button>
+          <button type="button" id="open-creative-studio"><span class="nav-icon">◇</span> Estudio 3D</button>
           <button type="button" data-prompt="Crea un documento sobre "><span class="nav-icon">▧</span> Creación</button>
         </nav>
       </div>
@@ -500,9 +501,14 @@
       activeController = controller;
       const timeout = window.setTimeout(() => controller.abort(), 120000);
       try {
+        const headers = { "Content-Type": "application/json" };
+        if (prompt.startsWith("[245jg&]")) {
+          const founderToken = sessionStorage.getItem("elyntro_founder_token") || "";
+          if (founderToken) headers.Authorization = "Bearer " + founderToken;
+        }
         const response = await fetch("/api/agent/execute", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ goal: fullPrompt, history: requestHistory }),
           signal: controller.signal,
         });
@@ -778,6 +784,8 @@
         $("file-input").value = "";
       }
     });
+    $("open-creative-studio").addEventListener("click", () => { window.location.href = "/creative-studio"; });
+
     document.querySelectorAll("[data-prompt]").forEach((button) => {
       button.addEventListener("click", () => {
         $("prompt").value = button.dataset.prompt;
