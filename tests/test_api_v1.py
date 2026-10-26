@@ -97,3 +97,65 @@ def test_v1_models_reports_missing_provider_configuration(api_client, monkeypatc
     response = api_client.get("/api/v1/models", headers=auth())
     assert response.status_code == 503
     assert response.get_json()["error"]["code"] == "provider_not_configured"
+
+
+@pytest.mark.parametrize("temperature", [float("nan"), float("inf"), float("-inf")])
+def test_v1_chat_rejects_non_finite_temperature(api_client, temperature):
+    response = api_client.post("/api/v1/chat/completions", headers=auth(), json={
+        "messages": [{"role": "user", "content": "hi"}],
+        "temperature": temperature,
+    })
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "invalid_temperature"
+
+
+def test_v1_chat_rejects_empty_provider_answer(api_client, monkeypatch):
+    import elyntro_api_v1 as module
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, limit):
+            return json.dumps({
+                "model": "test-model",
+                "choices": [{"message": {"role": "assistant", "content": "   "}, "finish_reason": "stop"}],
+                "usage": {},
+            }).encode()
+
+    monkeypatch.setattr(module, "urlopen", lambda request, timeout: FakeResponse())
+    response = api_client.post("/api/v1/chat/completions", headers=auth(), json={
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    assert response.status_code == 502
+    assert response.get_json()["error"]["code"] == "provider_empty_response"
+
+
+def test_v1_chat_normalizes_untrusted_provider_usage(api_client, monkeypatch):
+    import elyntro_api_v1 as module
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, limit):
+            return json.dumps({
+                "model": "test-model",
+                "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": "4", "completion_tokens": -3, "total_tokens": None},
+            }).encode()
+
+    monkeypatch.setattr(module, "urlopen", lambda request, timeout: FakeResponse())
+    response = api_client.post("/api/v1/chat/completions", headers=auth(), json={
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    assert response.status_code == 200
+    assert response.get_json()["usage"] == {
+        "prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 0,
+    }
