@@ -86,6 +86,7 @@ def main():
         ds = load_dataset(source["repo"], source["config"], **kwargs)
     else:
         ds = load_dataset(source["repo"], **kwargs)
+    ds = ds.shuffle(seed=a.seed, buffer_size=min(max(1000, a.max_records * 2), 10000))
     a.out_dir.mkdir(parents=True, exist_ok=True)
     output = a.out_dir / (a.source + (".jsonl" if source["kind"] == "sft" else ".txt"))
     seen, written, digest = set(), 0, hashlib.sha256()
