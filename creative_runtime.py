@@ -314,6 +314,122 @@ def browser_act():
     return jsonify({"ok": True, "mode": "ephemeral_allowlisted", "actions_completed": completed, "snapshot": snapshot, "screenshot_data_url": "data:image/jpeg;base64," + screenshot})
 
 
+def _github_api(method: str, path: str, payload: dict | None = None, *, allow_missing: bool = False):
+    token = os.getenv("ELYNTRO_GITHUB_TOKEN", "").strip()
+    repo = os.getenv("ELYNTRO_GITHUB_REPOSITORY", "").strip()
+    if not token or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        raise RuntimeError("GitHub App/token or repository is not configured")
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(
+        "https://api.github.com/repos/" + repo + path,
+        data=data,
+        headers={"Accept": "application/vnd.github+json", "Authorization": "Bearer " + token,
+                 "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Elyntro-FounderMode",
+                 "Content-Type": "application/json"},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            raw = response.read(1_000_001)
+        if len(raw) > 1_000_000:
+            raise RuntimeError("GitHub API response exceeded the size limit")
+        return json.loads(raw.decode("utf-8")) if raw else {}
+    except urllib.error.HTTPError as exc:
+        if allow_missing and exc.code == 404:
+            return None
+        raise RuntimeError("GitHub API returned HTTP " + str(exc.code)) from exc
+    except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("GitHub API request failed: " + type(exc).__name__) from exc
+
+
+def _selfdev_path_allowed(path: str) -> bool:
+    if not isinstance(path, str) or not path or len(path) > 220 or path.startswith("/") or "\\" in path:
+        return False
+    parts = path.split("/")
+    if any(part in {"", ".", ".."} or part.startswith(".") for part in parts):
+        return False
+    if path in {"app.py", "creative_runtime.py", "elyntro_api_v1.py", "tool_runtime.py",
+                "external_resources.py", "README.md", "requirements-creative.txt"}:
+        return True
+    return path.startswith(("static/", "tests/", "docs/"))
+
+
+@creative_api.post("/founder/selfdev/pull-request")
+def founder_selfdev_pull_request():
+    """Commit proposed file contents to an isolated branch and open a PR; never merge/deploy."""
+    if not _authorized(founder=True):
+        return _json_error("Founder Mode requiere ELYNTRO_FOUNDER_TOKEN.", 401)
+    if os.getenv("ELYNTRO_SELFDEV_ENABLED", "").lower() != "true":
+        return _json_error("La auto-modificación de repositorio está desactivada por defecto.", 503)
+    if not os.getenv("ELYNTRO_GITHUB_TOKEN", "").strip():
+        return _json_error("Configura un token GitHub de alcance mínimo en el servidor.", 503)
+    payload = request.get_json(silent=True) or {}
+    title, rationale, goal, files = payload.get("title"), payload.get("rationale"), payload.get("goal"), payload.get("files")
+    if not all(isinstance(value, str) and value.strip() for value in (title, rationale, goal)):
+        return _json_error("title, rationale y goal son obligatorios.", 400)
+    if len(title) > 160 or len(rationale) > 3000 or len(goal) > 5000:
+        return _json_error("El título, motivo u objetivo supera el límite de tamaño.", 400)
+    if not isinstance(files, list) or not files or len(files) > 12:
+        return _json_error("files debe contener entre 1 y 12 archivos.", 400)
+    clean_files, seen, total_bytes = [], set(), 0
+    for item in files:
+        if not isinstance(item, dict) or not _selfdev_path_allowed(item.get("path")):
+            return _json_error("Ruta no permitida. Solo se aceptan app/runtime, static, tests, docs y README.", 400)
+        path, content = item["path"], item.get("content")
+        if path in seen:
+            return _json_error("No se admiten rutas duplicadas.", 400)
+        if not isinstance(content, str) or not content.strip() or len(content.encode("utf-8")) > 200_000:
+            return _json_error("Cada archivo debe contener texto de hasta 200 KB.", 400)
+        seen.add(path)
+        total_bytes += len(content.encode("utf-8"))
+        clean_files.append({"path": path, "content": content})
+    if total_bytes > 500_000:
+        return _json_error("El conjunto de archivos supera 500 KB.", 413)
+    base_branch = os.getenv("ELYNTRO_GITHUB_BASE_BRANCH", "main").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,100}", base_branch) or ".." in base_branch.split("/"):
+        return _json_error("ELYNTRO_GITHUB_BASE_BRANCH no es válido.", 503)
+    branch_name = "elyntro-selfdev-" + uuid.uuid4().hex[:12]
+    branch_created = False
+    try:
+        ref_data = _github_api("GET", "/git/ref/heads/" + urllib.parse.quote(base_branch, safe="/"))
+        base_sha = ref_data.get("object", {}).get("sha") if isinstance(ref_data, dict) else None
+        if not isinstance(base_sha, str) or not re.fullmatch(r"[a-f0-9]{40}", base_sha):
+            raise RuntimeError("Could not resolve base branch commit")
+        _github_api("POST", "/git/refs", {"ref": "refs/heads/" + branch_name, "sha": base_sha})
+        branch_created = True
+        committed = []
+        for item in clean_files:
+            path = item["path"]
+            encoded_path = urllib.parse.quote(path, safe="/")
+            existing = _github_api("GET", "/contents/" + encoded_path + "?ref=" + urllib.parse.quote(branch_name, safe=""), allow_missing=True)
+            if existing is not None and (not isinstance(existing, dict) or existing.get("type") != "file" or not isinstance(existing.get("sha"), str)):
+                raise RuntimeError("Existing path is not a regular file: " + path)
+            body = {"message": "Founder Mode: " + title.strip()[:100], "content": base64.b64encode(item["content"].encode("utf-8")).decode("ascii"), "branch": branch_name}
+            if existing is not None:
+                body["sha"] = existing["sha"]
+            _github_api("PUT", "/contents/" + encoded_path, body)
+            committed.append(path)
+        pr_body = (
+            "## Founder Mode self-development proposal\n\n"
+            + "**Goal:** " + goal.strip() + "\n\n"
+            + "**Rationale:** " + rationale.strip() + "\n\n"
+            + "**Files changed:**\n" + "\n".join("- " + path for path in committed)
+            + "\n\n**Governance:** generated changes are isolated on a branch. CI and human code review are required. "
+              "This workflow never merges the PR or deploys production."
+        )
+        pr = _github_api("POST", "/pulls", {"title": title.strip(), "head": branch_name, "base": base_branch, "body": pr_body, "draft": True})
+        return jsonify({"ok": True, "branch": branch_name, "files": committed, "pull_request": {
+            "number": pr.get("number"), "url": pr.get("html_url"), "state": pr.get("state"), "draft": pr.get("draft", True)
+        }, "note": "Cambios escritos en una rama aislada. No se han fusionado ni desplegado."}), 201
+    except RuntimeError as exc:
+        if branch_created:
+            try:
+                _github_api("DELETE", "/git/refs/heads/" + branch_name)
+            except RuntimeError:
+                pass
+        return jsonify({"ok": False, "error": "No se pudo crear el PR de auto-desarrollo.", "detail": str(exc)}), 502
+
+
 def _proposal_root() -> Path:
     return Path(os.getenv("ELYNTRO_PROPOSAL_DIR", "/tmp/elyntro-proposals"))
 
