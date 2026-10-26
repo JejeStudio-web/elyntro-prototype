@@ -1,12 +1,6 @@
 name: Elyntro model training pipeline
 
 on:
-  push:
-    branches: [model/training-data-evaluation-serving]
-    paths:
-      - ".github/workflows/model-training.yml"
-      - "elyntro_model/**"
-      - "requirements-model.txt"
   workflow_dispatch:
     inputs:
       records:
