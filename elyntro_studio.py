@@ -187,7 +187,7 @@ def browser_action():
     except Exception as exc:return jsonify({"error":"Acción fallida.","detail":str(exc)[:200]}),502
 
 @studio_api.get("/browser/screenshot/<sid>")
-def browser_screenshot():
+def browser_screenshot(sid):
     denied=_denied()
     if denied:return denied
     try:
@@ -234,12 +234,12 @@ def _proposal_decision(pid,status,note):
         item["status"]=status;item["note"]=note
         return jsonify({"ok":True,"proposal":copy.deepcopy(item)})
 @studio_api.post("/founder/proposals/<pid>/approve")
-def proposal_approve():
+def proposal_approve(pid):
     denied=_denied()
     if denied:return denied
     return _proposal_decision(pid,"approved_for_manual_review","Aprobada para revisión manual; no se ha aplicado ni publicado.")
 @studio_api.post("/founder/proposals/<pid>/reject")
-def proposal_reject():
+def proposal_reject(pid):
     denied=_denied()
     if denied:return denied
     return _proposal_decision(pid,"rejected","Rechazada; no se ha aplicado ningún cambio.")
