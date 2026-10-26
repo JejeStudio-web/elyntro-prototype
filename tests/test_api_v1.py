@@ -29,7 +29,7 @@ def test_v1_models_returns_only_configured_model(api_client):
     response = api_client.get("/api/v1/models", headers=auth())
     assert response.status_code == 200
     assert response.get_json()["data"][0]["id"] == "test-model"
-    assert response.get_json()["data"][0]["capabilities"]["streaming"] is False
+    assert response.get_json()["data"][0]["capabilities"]["streaming"] is True
 
 
 def test_v1_chat_completion_uses_configured_compatible_provider(api_client, monkeypatch):
@@ -72,8 +72,6 @@ def test_v1_chat_completion_uses_configured_compatible_provider(api_client, monk
 
 
 @pytest.mark.parametrize("payload,code", [
-    ({"stream": True, "messages": [{"role": "user", "content": "hi"}]}, "streaming_not_supported"),
-    ({"messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]}, "multimodal_not_supported"),
     ({"messages": [{"role": "user", "content": "hi"}], "max_tokens": 999999}, "invalid_max_tokens"),
     ({"messages": [{"role": "user", "content": "hi"}], "model": "other"}, "model_not_available"),
 ])
