@@ -180,7 +180,10 @@
       .mobile-brand .mark { width: 30px; height: 30px; border-radius: 10px; }
       .topbar { min-height: 62px; padding: 10px 14px; }
       .section-title { display: none; }
+      .top-actions { gap: 5px; }
       .connection { gap: 5px; }
+      .connection #model-label { display: none; }
+      .utility-button { padding: 6px 7px; font-size: 10px; }
       .badge { padding: 5px 8px; font-size: 9px; }
       .workspace { padding: 34px 14px 15px; }
       .intro { margin-bottom: 22px; }
@@ -451,27 +454,25 @@
     async function submitPrompt(value) {
       const prompt = value.trim();
       if (busy || !prompt) return;
-      busy = true;
-      $("prompt").value = "";
-      $("send").disabled = true;
-      $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
       const fullPrompt = attachedText
         ? `${prompt}\n\n--- Archivo adjunto: ${attachedText.name} ---\n${attachedText.content}\n--- Fin del archivo adjunto ---`
         : prompt;
       if (fullPrompt.length > 10000) {
         $("status").textContent = "La petición y el archivo superan los 10.000 caracteres. Reduce el archivo o divide la tarea.";
-        busy = false;
-        $("send").disabled = false;
         return;
       }
+      busy = true;
+      $("prompt").value = "";
+      $("send").disabled = true;
+      $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
       const requestHistory = history.slice(-10);
       addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo adjunto: ${attachedText.name}]` : ""));
       history.push({ role: "user", content: fullPrompt });
-      saveHistory();
       attachedText = null;
       $("attachment").replaceChildren();
       $("file-input").value = "";
       while (history.length > 12) history.shift();
+      saveHistory();
       const pending = addMessage("assistant", "En curso", "Esperando respuesta de la API…");
       const controller = new AbortController();
       activeController = controller;
@@ -480,7 +481,7 @@
         const response = await fetch("/api/agent/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ goal: prompt, history: requestHistory }),
+          body: JSON.stringify({ goal: fullPrompt, history: requestHistory }),
           signal: controller.signal,
         });
         const data = await responseJson(response);
@@ -593,7 +594,7 @@
       document.body.classList.toggle("light");
       const theme = document.body.classList.contains("light") ? "light" : "dark";
       try { localStorage.setItem(THEME_KEY, theme); } catch {}
-      $("theme-toggle").textContent = theme === "light" ? "Tema claro" : "Tema oscuro";
+      $("theme-toggle").textContent = theme === "light" ? "Cambiar a oscuro" : "Cambiar a claro";
     });
 
     $("attach-file").addEventListener("click", () => $("file-input").click());
@@ -653,7 +654,7 @@
     try {
       if (localStorage.getItem(THEME_KEY) === "light") {
         document.body.classList.add("light");
-        $("theme-toggle").textContent = "Tema claro";
+        $("theme-toggle").textContent = "Cambiar a oscuro";
       }
     } catch {}
     restoreHistory();
