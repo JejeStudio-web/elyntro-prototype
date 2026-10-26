@@ -17,7 +17,7 @@ import urllib.parse
 import urllib.error
 import urllib.request
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.middleware.proxy_fix import ProxyFix
 from elyntro import CognitiveLoop, EvidenceVerifier
 from elyntro.contracts import TaskRequest
@@ -81,6 +81,54 @@ _TASK_TOKEN_SECRET = _load_task_token_secret()
 _RATE_LIMITS = defaultdict(deque)
 _RATE_LIMIT_LOCK = threading.Lock()
 _RATE_WINDOW_SECONDS = 60
+_API_KEY_BUCKETS = defaultdict(deque)
+
+def _configured_api_keys():
+    return {item.strip() for item in os.environ.get("ELYNTRO_API_KEYS", "").split(",") if item.strip()}
+
+def _api_key_from_request():
+    authorization = request.headers.get("Authorization", "")
+    return authorization[7:].strip() if authorization.lower().startswith("bearer ") else request.headers.get("X-Elyntro-API-Key", "").strip()
+
+def _stream_provider_completion(messages, model, max_tokens, temperature, json_mode=False):
+    config = _model_provider_config()
+    if not config.get("configured"):
+        return jsonify({"error": {"message": "El proveedor no está configurado", "type": "configuration_error"}}), 503
+    body = {"model": config["model"], "messages": messages, "max_tokens": max_tokens, "temperature": temperature, "stream": True}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    req = urllib.request.Request(config["base_url"] + "/chat/completions", data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "text/event-stream", "User-Agent": "Elyntro/1.1"}, method="POST")
+    if config.get("api_key"):
+        req.add_unredirected_header("Authorization", "Bearer " + config["api_key"])
+    @stream_with_context
+    def generate():
+        try:
+            with urllib.request.urlopen(req, timeout=55) as upstream:
+                for raw_line in upstream:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        yield "data: [DONE]\\n\\n"
+                        return
+                    try:
+                        parsed = json.loads(data)
+                        if isinstance(parsed, dict):
+                            parsed["model"] = model
+                            yield "data: " + json.dumps(parsed, ensure_ascii=False, separators=(",", ":")) + "\\n\\n"
+                    except ValueError:
+                        continue
+            yield "data: [DONE]\\n\\n"
+        except urllib.error.HTTPError as exc:
+            yield "data: " + json.dumps({"error": {"message": "El proveedor rechazó la solicitud durante el streaming", "type": "provider_error", "status": exc.code}}) + "\\n\\n"
+            yield "data: [DONE]\\n\\n"
+        except (urllib.error.URLError, TimeoutError, OSError):
+            yield "data: " + json.dumps({"error": {"message": "Se perdió la conexión con el proveedor durante el streaming", "type": "provider_connection_error"}}) + "\\n\\n"
+            yield "data: [DONE]\\n\\n"
+    return Response(generate(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
+
 
 def _task_access_token(task_id: str) -> str:
     digest = hmac.new(_TASK_TOKEN_SECRET, task_id.encode("utf-8"), hashlib.sha256).digest()
@@ -123,6 +171,21 @@ def _apply_api_limits():
         "/api/v1/chat/completions": int(os.environ.get("ELYNTRO_RATE_LIMIT_CHAT_PER_MINUTE", "20")),
         "/api/tasks": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
     }
+    configured_keys = _configured_api_keys()
+    if request.path.startswith("/api/v1/") and request.path not in {"/api/v1/health"} and configured_keys:
+        supplied = _api_key_from_request()
+        if not supplied or not any(hmac.compare_digest(supplied, key) for key in configured_keys):
+            return jsonify({"error": {"message": "API key missing or invalid", "type": "authentication_error"}}), 401
+        fingerprint = hashlib.sha256(supplied.encode("utf-8")).hexdigest()[:20]
+        per_key_limit = max(1, min(int(os.environ.get("ELYNTRO_API_RATE_LIMIT_PER_MINUTE", "60")), 600))
+        now_key = time.monotonic()
+        with _RATE_LIMIT_LOCK:
+            bucket = _API_KEY_BUCKETS[("api-key", fingerprint)]
+            while bucket and now_key - bucket[0] >= _RATE_WINDOW_SECONDS:
+                bucket.popleft()
+            if len(bucket) >= per_key_limit:
+                return jsonify({"error": {"message": "API key rate limit exceeded", "type": "rate_limit_error"}}), 429
+            bucket.append(now_key)
     if request.method != "POST" or request.path not in limits:
         return None
     limit = max(1, min(limits[request.path], 600))
@@ -563,8 +626,9 @@ def api_v1_chat_completions():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return jsonify({"error": {"message": "El cuerpo debe ser un objeto JSON", "type": "invalid_request_error"}}), 400
-    if body.get("stream", False) is not False:
-        return jsonify({"error": {"message": "El streaming todavía no está implementado; usa stream=false", "type": "unsupported_parameter"}}), 400
+    stream_requested = body.get("stream", False)
+    if not isinstance(stream_requested, bool):
+        return jsonify({"error": {"message": "stream debe ser booleano", "type": "invalid_request_error"}}), 400
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages or len(messages) > 32:
         return jsonify({"error": {"message": "messages debe contener entre 1 y 32 mensajes", "type": "invalid_request_error"}}), 400
@@ -595,6 +659,8 @@ def api_v1_chat_completions():
         if not isinstance(response_format, dict) or response_format.get("type") != "json_object" or set(response_format) != {"type"}:
             return jsonify({"error": {"message": "Solo se admite response_format.type=json_object", "type": "invalid_request_error"}}), 400
         json_mode = True
+    if stream_requested:
+        return _stream_provider_completion(normalized, config.get("model") or requested_model, max_tokens, float(temperature), json_mode=json_mode)
     result = _groq_messages(normalized, max_tokens=max_tokens, temperature=float(temperature), json_mode=json_mode)
     if not result.get("text"):
         status = _provider_http_status(result)
