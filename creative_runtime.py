@@ -315,7 +315,7 @@ def browser_act():
                     completed.append({"type": "hover_text", "text": action["text"].strip(), "ok": True})
                 elif action["type"] == "click_button":
                     locator = page.get_by_role("button", name=action["text"].strip(), exact=True).first
-                    safe = locator.evaluate("(el) => !el.disabled && el.type !== 'submit' && !el.closest('form') && !el.hasAttribute('download')")
+                    safe = locator.evaluate("(el) => !el.disabled && !el.closest('form') && !el.hasAttribute('download')")
                     if not safe:
                         raise ValueError("El botón está deshabilitado o forma parte de un formulario.")
                     locator.click(timeout=3000)
