@@ -60,7 +60,7 @@ def main():
         "results": results,
     }
     a.out.parent.mkdir(parents=True, exist_ok=True)
-    a.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+    a.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "results"}, ensure_ascii=False))
 
 
