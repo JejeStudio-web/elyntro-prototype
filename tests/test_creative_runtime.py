@@ -390,3 +390,21 @@ def test_playwright_routes_proxy_to_private_worker(monkeypatch):
     assert seen["url"] == "http://elyntro-browser-worker:10000/v1/inspect"
     assert seen["auth"] == "Bearer worker-secret"
     assert seen["timeout"] == 35
+
+
+def test_playwright_proxy_rejects_public_worker_hostname_before_sending_token(monkeypatch):
+    import app as mod
+    import creative_runtime
+
+    def unexpected_urlopen(*args, **kwargs):
+        raise AssertionError("worker token must never be sent to a public hostname")
+
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-api-key")
+    monkeypatch.setenv("ELYNTRO_PLAYWRIGHT_ENABLED", "true")
+    monkeypatch.setenv("ELYNTRO_BROWSER_WORKER_URL", "http://public.example.com:10000")
+    monkeypatch.setenv("ELYNTRO_BROWSER_WORKER_TOKEN", "worker-secret")
+    monkeypatch.setattr(creative_runtime.urllib.request, "urlopen", unexpected_urlopen)
+    response = mod.app.test_client().post("/api/creative/browser/inspect",
+        headers={"Authorization": "Bearer test-api-key"},
+        json={"url": "https://example.com"})
+    assert response.status_code == 503
