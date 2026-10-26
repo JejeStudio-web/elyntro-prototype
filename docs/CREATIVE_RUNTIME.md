@@ -22,6 +22,7 @@ Set `ELYNTRO_FOUNDER_TOKEN` to expose proposal creation. `POST /api/creative/fou
 - `POST /api/creative/comfyui/generate`: authenticated workflow submission.
 - `GET /api/creative/comfyui/history/<prompt_id>`: authenticated bounded history lookup.
 - `POST /api/creative/browser/inspect`: authenticated read-only page inspection; disabled by default.
+- `POST /api/creative/browser/act`: up to eight allowlisted `click_link` / `scroll` actions in an ephemeral browser; no forms or action buttons, disabled by default.
 - `POST /api/creative/founder/proposals`: founder-token-gated proposal storage, never automatic apply.
 
 ## Deployment notes
