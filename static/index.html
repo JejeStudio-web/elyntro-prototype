@@ -229,6 +229,7 @@
           </div>
           <button class="utility-button" id="theme-toggle" type="button" aria-label="Cambiar tema">Tema</button>
           <button class="utility-button" id="export-chat" type="button">Exportar</button>
+          <button class="utility-button" id="clear-history" type="button" title="Borra los mensajes guardados en este navegador">Borrar historial</button>
         </div>
       </header>
 
@@ -467,7 +468,11 @@
       $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
       const requestHistory = history.slice(-10);
       addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo adjunto: ${attachedText.name}]` : ""));
-      history.push({ role: "user", content: fullPrompt });
+      // The attachment content is sent only in the current request; never persist it in local history.
+      const storedUserMessage = prompt + (attachedText
+        ? `\n[Archivo adjunto: ${attachedText.name}; contenido no guardado en el historial]`
+        : "");
+      history.push({ role: "user", content: storedUserMessage });
       attachedText = null;
       $("attachment").replaceChildren();
       $("file-input").value = "";
@@ -588,6 +593,21 @@
       link.download = "elyntro-conversacion.md";
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+
+    $("clear-history").addEventListener("click", () => {
+      if (!window.confirm("¿Borrar la conversación visible y los mensajes guardados en este navegador? Esta acción no se puede deshacer.")) return;
+      if (busy && activeController) activeController.abort();
+      conversation.replaceChildren();
+      history.splice(0, history.length);
+      try { localStorage.removeItem(HISTORY_KEY); } catch {}
+      attachedText = null;
+      $("attachment").replaceChildren();
+      $("file-input").value = "";
+      $("welcome").hidden = false;
+      $("suggestions").hidden = false;
+      $("status").textContent = "Historial local borrado. El tema visual se conserva.";
+      $("prompt").focus();
     });
 
     $("theme-toggle").addEventListener("click", () => {
