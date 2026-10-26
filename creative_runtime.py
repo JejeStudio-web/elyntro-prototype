@@ -232,10 +232,11 @@ def browser_inspect():
                 href: a.href
               })).filter(a => /^https?:/.test(a.href))
             })""")
+            screenshot = base64.b64encode(page.screenshot(type="jpeg", quality=45, full_page=False)).decode("ascii")
             browser.close()
     except Exception as exc:
         return jsonify({"ok": False, "error": "No se pudo inspeccionar la página.", "detail": type(exc).__name__}), 502
-    return jsonify({"ok": True, "snapshot": snapshot, "mode": "read_only", "actions_taken": []})
+    return jsonify({"ok": True, "snapshot": snapshot, "screenshot_data_url": "data:image/jpeg;base64," + screenshot, "mode": "read_only", "actions_taken": []})
 
 
 @creative_api.post("/browser/act")
