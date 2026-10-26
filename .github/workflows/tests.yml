@@ -36,5 +36,17 @@ jobs:
           Path("/tmp/elyntro-frontend.js").write_text(scripts[0], encoding="utf-8")
           PY
           node --check /tmp/elyntro-frontend.js
+      - name: Validate Creative Studio module syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("static/creative-studio.html").read_text(encoding="utf-8")
+          scripts = re.findall(r'<script type="module">(.*?)</script>', html, flags=re.DOTALL)
+          if len(scripts) != 1:
+              raise SystemExit(f"Expected exactly one Studio module script, found {len(scripts)}")
+          Path("/tmp/elyntro-studio.mjs").write_text(scripts[0], encoding="utf-8")
+          PY
+          node --check /tmp/elyntro-studio.mjs
       - name: Run tests
         run: python -m pytest -q
