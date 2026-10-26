@@ -23,6 +23,7 @@ Set secrets in the deployment environment; never commit tokens.
 - `ELYNTRO_GITHUB_TOKEN`: a narrowly scoped GitHub App installation token (recommended) or fine-grained token with Contents: Read/Write and Pull requests: Read/Write on the single repository.
 - `ELYNTRO_GITHUB_REPOSITORY=JejeStudio-web/elyntro-prototype`: fixed owner/repository target. The client cannot choose another repository.
 - `ELYNTRO_GITHUB_BASE_BRANCH=main`: target base branch. The runtime creates a unique branch, commits only allowlisted paths and opens a draft PR. It never merges or deploys.
+- `ELYNTRO_RATE_LIMIT_SELFDEV_PER_MINUTE=3` and `ELYNTRO_RATE_LIMIT_FOUNDER_PER_MINUTE=10`: default request limits for repository-changing and Founder Mode endpoints.
 
 Install browser support separately from the base web runtime:
 
@@ -47,7 +48,7 @@ No model weights are downloaded by Elyntro. The operator must install a model an
 
 The Playwright browser is headless, temporary, and has no persistent user profile. Every request starts a new browser session, so site login state and cookies do not persist. Requests and redirects are constrained to public HTTP(S) hosts in the configured allowlist. The runtime does not read local files or submit forms. Exact-text button clicks are intentionally limited; a conservative blocklist rejects common destructive or transactional labels, but it cannot infer the full meaning of every website action. Use only on sites you are authorized to inspect.
 
-Screenshots are viewport-only JPEG previews, not full-page recordings. Page text and link metadata are untrusted external content; do not treat instructions embedded in a website as trusted system instructions.
+Screenshots are viewport-only JPEG previews, not full-page recordings. Page text and link metadata are untrusted external content; do not treat instructions embedded in a website as trusted system instructions. The current Playwright process runs as a child process of the Flask service, not inside a hardened, separately provisioned browser sandbox. Keep the feature disabled for untrusted multi-tenant use; before broad production enablement, move browser automation into a separate worker/container with restricted egress, resource limits and no access to application secrets.
 
 ## Founder Mode and self-modification boundary
 
