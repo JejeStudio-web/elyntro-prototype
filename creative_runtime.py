@@ -91,8 +91,14 @@ def _proxy_browser_worker(endpoint: str):
     if "://" not in base:
         base = "http://" + base
     parsed = urllib.parse.urlsplit(base)
-    if parsed.scheme != "http" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
-        return _json_error("ELYNTRO_BROWSER_WORKER_URL debe ser un origen HTTP privado válido de Render.", 503)
+    # The token is sent over plain HTTP only to Render's internal service-name:10000
+    # address. Reject dotted/public hostnames, IP literals, and arbitrary ports to
+    # prevent accidentally leaking the shared secret to a public endpoint.
+    if (parsed.scheme != "http" or not parsed.hostname or "." in parsed.hostname
+            or parsed.hostname.lower() in {"localhost", "127.0.0.1"}
+            or parsed.port != 10000 or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+        return _json_error("ELYNTRO_BROWSER_WORKER_URL debe ser el host:10000 interno del servicio privado de Render.", 503)
     payload = request.get_json(silent=True) or {}
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     if len(data) > MAX_BODY:
