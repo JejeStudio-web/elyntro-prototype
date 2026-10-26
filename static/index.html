@@ -147,6 +147,26 @@
     .status-pill.success { border-color: #3d745f; color: var(--teal); }
     .status-pill.failed { border-color: #82545d; color: var(--danger); }
     .mobile-brand { display: none; }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .utility-button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: #ffffff08; color: var(--text); font-size: 11px; }
+    .utility-button:hover { border-color: var(--accent-strong); background: #ffffff12; }
+    .composer-tools { display: flex; align-items: center; gap: 8px; padding: 2px 2px 8px; }
+    .attach-button { padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background: #ffffff08; color: var(--text); font-size: 11px; }
+    .attachment-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 5px 9px; border: 1px solid #3d745f; border-radius: 9px; color: var(--teal); font-size: 11px; overflow-wrap: anywhere; }
+    .attachment-chip button { border: 0; background: transparent; color: inherit; font-size: 14px; }
+    .typing { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+    .typing::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 4px #8dd8ca18; }
+    body.light { color-scheme: light; --bg: #f4f6fb; --panel: #ffffff; --panel-raised: #eef1f8; --line: #d9dfeb; --text: #182033; --muted: #5e6a80; --accent: #4d5fc1; --accent-strong: #6577d6; --teal: #177a66; --danger: #a62e42; background: radial-gradient(ellipse at 60% -20%, #dfe5ff 0, transparent 48%), var(--bg); }
+    body.light .sidebar, body.light .topbar { background: #f4f6fbe8; border-color: #18203316; }
+    body.light .new-task { background: #e3e7ff; color: #20284a; }
+    body.light .suggestion, body.light .composer { background: #ffffffd9; }
+    body.light .message.user { background: #e9edff; border-color: #c3ccf5; }
+    body.light .result-card { background: #f6f8fc; }
+    body.light .small-button { background: #e8ecff; }
+    body.light .utility-button, body.light .attach-button { background: #ffffff; }
+    .message-tools { display: flex; justify-content: flex-end; margin-top: 10px; }
+    .copy-button { padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); font-size: 10px; }
+    .copy-button:hover { color: var(--text); border-color: var(--accent-strong); }
 
     @media (max-width: 900px) {
       .shell { grid-template-columns: 205px minmax(0, 1fr); }
@@ -199,9 +219,13 @@
       <header class="topbar">
         <div class="mobile-brand"><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
         <div class="section-title">Asistente · Ejecución verificable</div>
-        <div class="connection" aria-live="polite">
-          <span class="badge"><span class="dot" id="health-dot"></span><span id="health-label">Comprobando API…</span></span>
-          <span class="badge" id="model-label">Modelo sin comprobar</span>
+        <div class="top-actions">
+          <div class="connection" aria-live="polite">
+            <span class="badge"><span class="dot" id="health-dot"></span><span id="health-label">Comprobando API…</span></span>
+            <span class="badge" id="model-label">Modelo sin comprobar</span>
+          </div>
+          <button class="utility-button" id="theme-toggle" type="button" aria-label="Cambiar tema">Tema</button>
+          <button class="utility-button" id="export-chat" type="button">Exportar</button>
         </div>
       </header>
 
@@ -223,9 +247,14 @@
         <div class="composer-wrap">
           <form id="composer-form">
             <div class="composer">
+              <div class="composer-tools">
+                <button class="attach-button" id="attach-file" type="button">＋ Adjuntar texto</button>
+                <input id="file-input" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden>
+                <span id="attachment" aria-live="polite"></span>
+              </div>
               <textarea id="prompt" maxlength="10000" rows="2" placeholder="Escribe lo que necesitas…" aria-label="Tu petición" required></textarea>
               <div class="composer-bottom">
-                <span class="composer-note">Texto · hasta 10.000 caracteres</span>
+                <span class="composer-note">Texto y archivos .txt/.md/.csv/.json · máximo 8 KB por archivo</span>
                 <button class="send" id="send" type="submit">Ejecutar
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
                 </button>
@@ -243,7 +272,11 @@
     const $ = (id) => document.getElementById(id);
     const conversation = $("conversation");
     const history = [];
+    const HISTORY_KEY = "elyntro.conversation.v1";
+    const THEME_KEY = "elyntro.theme.v1";
     let busy = false;
+    let attachedText = null;
+    let activeController = null;
 
     function element(tag, className, text) {
       const node = document.createElement(tag);
@@ -260,6 +293,22 @@
       const body = element("div", "message-body");
       if (text) body.textContent = text;
       article.append(head, body);
+      if (role === "assistant" && text) {
+        const tools = element("div", "message-tools");
+        const copy = element("button", "copy-button", "Copiar respuesta");
+        copy.type = "button";
+        copy.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(body.innerText || body.textContent || "");
+            copy.textContent = "Copiado";
+            window.setTimeout(() => { copy.textContent = "Copiar respuesta"; }, 1400);
+          } catch {
+            $("status").textContent = "No se pudo acceder al portapapeles; selecciona y copia el texto manualmente.";
+          }
+        });
+        tools.append(copy);
+        article.append(tools);
+      }
       conversation.append(article);
       $("welcome").hidden = true;
       $("suggestions").hidden = true;
@@ -406,12 +455,26 @@
       $("prompt").value = "";
       $("send").disabled = true;
       $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
+      const fullPrompt = attachedText
+        ? `${prompt}\n\n--- Archivo adjunto: ${attachedText.name} ---\n${attachedText.content}\n--- Fin del archivo adjunto ---`
+        : prompt;
+      if (fullPrompt.length > 10000) {
+        $("status").textContent = "La petición y el archivo superan los 10.000 caracteres. Reduce el archivo o divide la tarea.";
+        busy = false;
+        $("send").disabled = false;
+        return;
+      }
       const requestHistory = history.slice(-10);
-      addMessage("user", "Petición", prompt);
-      history.push({ role: "user", content: prompt });
+      addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo adjunto: ${attachedText.name}]` : ""));
+      history.push({ role: "user", content: fullPrompt });
+      saveHistory();
+      attachedText = null;
+      $("attachment").replaceChildren();
+      $("file-input").value = "";
       while (history.length > 12) history.shift();
       const pending = addMessage("assistant", "En curso", "Esperando respuesta de la API…");
       const controller = new AbortController();
+      activeController = controller;
       const timeout = window.setTimeout(() => controller.abort(), 120000);
       try {
         const response = await fetch("/api/agent/execute", {
@@ -457,6 +520,7 @@
           history.push({ role: "assistant", content: `Estado de tarea: ${state}` });
         }
         while (history.length > 12) history.shift();
+        saveHistory();
       } catch (error) {
         pending.article.classList.add("error");
         pending.body.textContent = error.name === "AbortError"
@@ -466,6 +530,7 @@
       } finally {
         window.clearTimeout(timeout);
         busy = false;
+        activeController = null;
         $("send").disabled = false;
         $("prompt").focus();
       }
@@ -482,11 +547,84 @@
       }
     });
     $("new-task").addEventListener("click", () => {
+      if (busy && activeController) activeController.abort();
       conversation.replaceChildren();
+      history.splice(0, history.length);
+      saveHistory();
+      attachedText = null;
+      $("attachment").replaceChildren();
+      $("file-input").value = "";
       $("welcome").hidden = false;
       $("suggestions").hidden = false;
-      $("status").textContent = "";
+      $("status").textContent = "Nueva conversación iniciada.";
       $("prompt").focus();
+    });
+
+    function saveHistory() {
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-12))); }
+      catch { $("status").textContent = "El historial no se pudo guardar en este navegador."; }
+    }
+
+    function restoreHistory() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+        if (!Array.isArray(saved)) return;
+        for (const item of saved.slice(-12)) {
+          if (!item || !["user", "assistant"].includes(item.role) || typeof item.content !== "string") continue;
+          history.push({ role: item.role, content: item.content });
+          addMessage(item.role, "Historial local", item.content);
+        }
+        if (history.length) $("status").textContent = "Conversación restaurada desde este navegador; los detalles de tareas y archivos no se guardan en el historial local.";
+      } catch { localStorage.removeItem(HISTORY_KEY); }
+    }
+
+    $("export-chat").addEventListener("click", () => {
+      const markdown = history.map(item => `## ${item.role === "user" ? "Tú" : "Elyntro"}\n\n${item.content}`).join("\n\n---\n\n");
+      if (!markdown) { $("status").textContent = "No hay mensajes que exportar."; return; }
+      const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "elyntro-conversacion.md";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+
+    $("theme-toggle").addEventListener("click", () => {
+      document.body.classList.toggle("light");
+      const theme = document.body.classList.contains("light") ? "light" : "dark";
+      try { localStorage.setItem(THEME_KEY, theme); } catch {}
+      $("theme-toggle").textContent = theme === "light" ? "Tema claro" : "Tema oscuro";
+    });
+
+    $("attach-file").addEventListener("click", () => $("file-input").click());
+    $("file-input").addEventListener("change", async () => {
+      const file = $("file-input").files?.[0];
+      if (!file) return;
+      const allowed = /\.(txt|md|csv|json)$/i.test(file.name);
+      if (!allowed) { $("status").textContent = "Formato no admitido. Usa .txt, .md, .csv o .json."; $("file-input").value = ""; return; }
+      if (file.size > 8192) { $("status").textContent = "El archivo supera el límite de 8 KB."; $("file-input").value = ""; return; }
+      try {
+        const content = await file.text();
+        if (content.includes("\u0000")) throw new Error("El archivo parece binario; adjunta un archivo de texto.");
+        attachedText = { name: file.name.replace(/[\\/]/g, "_").slice(0, 100), content };
+        const chip = element("span", "attachment-chip", `${attachedText.name} · ${file.size} B`);
+        const remove = element("button", "", "×");
+        remove.type = "button";
+        remove.setAttribute("aria-label", "Quitar archivo adjunto");
+        remove.addEventListener("click", () => {
+          attachedText = null;
+          $("attachment").replaceChildren();
+          $("file-input").value = "";
+        });
+        chip.append(remove);
+        $("attachment").replaceChildren(chip);
+        $("status").textContent = "Archivo leído en el navegador y listo para incluir en la petición.";
+      } catch (error) {
+        attachedText = null;
+        $("attachment").replaceChildren();
+        $("status").textContent = error.message || "No se pudo leer el archivo.";
+        $("file-input").value = "";
+      }
     });
     document.querySelectorAll("[data-prompt]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -512,6 +650,13 @@
         $("model-label").textContent = "Proveedor sin comprobar";
       }
     }
+    try {
+      if (localStorage.getItem(THEME_KEY) === "light") {
+        document.body.classList.add("light");
+        $("theme-toggle").textContent = "Tema claro";
+      }
+    } catch {}
+    restoreHistory();
     checkHealth();
   </script>
 </body>
