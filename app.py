@@ -28,6 +28,7 @@ from elyntro.planner import RuleBasedPlanner, ToolDefinition
 from elyntro.store import SQLiteStore
 from elyntro.task_executor import StepResult, TaskExecutor
 from search_providers import TavilySearchProvider, fetch_public_http, is_public_http_url
+import external_resources
 from tool_runtime import ToolRuntime, safe_calculate
 
 logger = logging.getLogger(__name__)
@@ -841,6 +842,9 @@ def _run_tool_agent(goal, history):
             "calculate": _agent_tool_calculate,
             "web_search": _agent_tool_search,
             "web_open": _agent_tool_open_page,
+            "wikipedia_search": external_resources.wikipedia_search,
+            "crossref_search": external_resources.crossref_search,
+            "arxiv_search": external_resources.arxiv_search,
         },
         max_steps=5,
     )
