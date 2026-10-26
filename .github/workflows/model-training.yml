@@ -28,6 +28,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: elyntro-model-training-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   RECORDS: ${{ github.event.inputs.records || '300' }}
   PRETRAIN_STEPS: ${{ github.event.inputs.pretrain_steps || '100' }}
