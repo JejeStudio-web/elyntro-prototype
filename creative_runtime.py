@@ -5,6 +5,7 @@ Self-modification creates reviewable proposals only; it never executes or applie
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -248,6 +249,60 @@ def browser_act():
     return jsonify({"ok": True, "mode": "ephemeral_allowlisted", "actions_completed": completed, "snapshot": snapshot})
 
 
+def _proposal_root() -> Path:
+    return Path(os.getenv("ELYNTRO_PROPOSAL_DIR", "/tmp/elyntro-proposals"))
+
+
+@creative_api.get("/founder/proposals")
+def founder_list_proposals():
+    if not _authorized(founder=True):
+        return _json_error("Founder Mode requiere ELYNTRO_FOUNDER_TOKEN.", 401)
+    root = _proposal_root()
+    proposals = []
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        for path in sorted(root.glob("prop_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:100]:
+            try:
+                item = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(item, dict) and re.fullmatch(r"prop_[a-f0-9]{16}", str(item.get("id", ""))):
+                    proposals.append({key: item.get(key) for key in ("id", "title", "rationale", "patch_sha256", "created_at", "reviewed_at", "status", "policy")})
+            except (OSError, ValueError):
+                continue
+    except OSError:
+        return _json_error("No se pudieron leer las propuestas.", 500)
+    return jsonify({"ok": True, "proposals": proposals})
+
+
+@creative_api.post("/founder/proposals/<proposal_id>/review")
+def founder_review_proposal(proposal_id: str):
+    if not _authorized(founder=True):
+        return _json_error("Founder Mode requiere ELYNTRO_FOUNDER_TOKEN.", 401)
+    if not re.fullmatch(r"prop_[a-f0-9]{16}", proposal_id):
+        return _json_error("Identificador de propuesta no válido.", 400)
+    decision = (request.get_json(silent=True) or {}).get("decision")
+    if decision not in {"approve", "reject"}:
+        return _json_error("decision debe ser approve o reject.", 400)
+    path = _proposal_root() / (proposal_id + ".json")
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _json_error("Propuesta no encontrada.", 404)
+    except (OSError, ValueError):
+        return _json_error("No se pudo leer la propuesta.", 500)
+    if record.get("status") != "pending_human_review":
+        return _json_error("Solo se pueden revisar propuestas pendientes.", 409)
+    record["status"] = "approved_for_manual_implementation" if decision == "approve" else "rejected"
+    record["reviewed_at"] = int(time.time())
+    record["review_decision"] = decision
+    record["policy"] = {"auto_apply": False, "execute_patch": False, "requires_tests": True, "requires_human_approval": True}
+    try:
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return _json_error("No se pudo guardar la revisión.", 500)
+    return jsonify({"ok": True, "proposal": {key: record.get(key) for key in ("id", "title", "status", "reviewed_at", "patch_sha256", "policy")},
+                    "note": "La aprobación autoriza revisión/implementación manual; no aplica ni ejecuta el parche."})
+
+
 @creative_api.post("/founder/proposals")
 def founder_proposal():
     if not _authorized(founder=True):
@@ -266,7 +321,7 @@ def founder_proposal():
         "created_at": int(time.time()), "status": "pending_human_review",
         "policy": {"auto_apply": False, "execute_patch": False, "requires_tests": True, "requires_human_approval": True}
     }
-    root = Path(os.getenv("ELYNTRO_PROPOSAL_DIR", "/tmp/elyntro-proposals"))
+    root = _proposal_root()
     try:
         root.mkdir(parents=True, exist_ok=True)
         (root / (proposal_id + ".json")).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
