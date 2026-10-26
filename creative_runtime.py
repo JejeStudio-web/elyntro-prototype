@@ -154,7 +154,23 @@ def browser_inspect():
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=False)
+            def guard_request(route):
+                candidate = route.request.url
+                candidate_host = (urllib.parse.urlsplit(candidate).hostname or "").lower()
+                if not is_public_http_url(candidate) or not any(
+                    candidate_host == domain or candidate_host.endswith("." + domain)
+                    for domain in allowed
+                ):
+                    route.abort()
+                else:
+                    route.continue_()
+            page.route("**/*", guard_request)
             page.goto(url, wait_until="domcontentloaded", timeout=12000)
+            final_url = page.url
+            final_host = (urllib.parse.urlsplit(final_url).hostname or "").lower()
+            if not is_public_http_url(final_url) or not any(final_host == d or final_host.endswith("." + d) for d in allowed):
+                browser.close()
+                return _json_error("La navegación redirigió fuera del dominio público permitido.", 403)
             snapshot = page.evaluate("""() => ({
               title: document.title.slice(0,300),
               url: location.href,
