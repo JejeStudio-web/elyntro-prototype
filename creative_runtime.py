@@ -434,6 +434,24 @@ def _proposal_root() -> Path:
     return Path(os.getenv("ELYNTRO_PROPOSAL_DIR", "/tmp/elyntro-proposals"))
 
 
+def save_founder_proposal(title: str, rationale: str, patch: str) -> dict:
+    if not all(isinstance(value, str) and value.strip() for value in (title, rationale, patch)):
+        raise ValueError("title, rationale y patch son obligatorios.")
+    if len(title) > 160 or len(rationale) > 3000 or len(patch) > 30000:
+        raise ValueError("La propuesta supera los límites de tamaño.")
+    proposal_id = "prop_" + uuid.uuid4().hex[:16]
+    record = {
+        "id": proposal_id, "title": title.strip(), "rationale": rationale.strip(),
+        "patch": patch, "patch_sha256": hashlib.sha256(patch.encode()).hexdigest(),
+        "created_at": int(time.time()), "status": "pending_human_review",
+        "policy": {"auto_apply": False, "execute_patch": False, "requires_tests": True, "requires_human_approval": True}
+    }
+    root = _proposal_root()
+    root.mkdir(parents=True, exist_ok=True)
+    (root / (proposal_id + ".json")).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    return record
+
+
 @creative_api.get("/founder/proposals")
 def founder_list_proposals():
     if not _authorized(founder=True):
