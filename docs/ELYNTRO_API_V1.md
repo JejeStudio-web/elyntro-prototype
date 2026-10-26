@@ -93,3 +93,15 @@ or per-account quota management. Do not embed it in frontend JavaScript.
 - Streaming, image/audio/video payloads, user-account authentication, per-account quotas, persistent usage billing, and API-key issuance are not implemented by this step.
 - The API is an Elyntro-controlled gateway; it does not make external model weights proprietary to Elyntro.
 - Existing application calls now use the same configured provider adapter for ordinary chat, model-assisted artifact creation, and model-assisted routing.
+
+
+## Streaming
+
+Set `"stream": true` on `POST /api/v1/chat/completions` to receive
+`text/event-stream` chunks. Each provider `data:` event is relayed as a JSON
+chunk; the response ends with `data: [DONE]`. The implementation keeps the
+upstream connection open while yielding chunks. Network/provider errors after
+the HTTP stream begins are emitted as an SSE `error` object and then `[DONE]`;
+clients must inspect each event rather than relying only on the initial HTTP
+status. Streaming is text-only and does not imply tool-call, image, audio, or
+video support.
