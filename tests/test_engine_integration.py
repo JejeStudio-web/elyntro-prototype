@@ -194,8 +194,9 @@ def test_unified_execute_uses_model_router_and_preserves_context(monkeypatch):
         calls.append(messages)
         if max_tokens == 220:
             return {"text": '{"route":"answer","reason":"Pregunta explicativa","search_query":""}'}
-        return {"text": "Respuesta de prueba", "model": "openai/gpt-oss-20b",
-                "requested_model": "openai/gpt-oss-20b", "response_id": "resp_test"}
+        return {"text": json.dumps({"action": "final", "answer": "Respuesta de prueba"}),
+                "model": "openai/gpt-oss-20b", "requested_model": "openai/gpt-oss-20b",
+                "response_id": "resp_test"}
 
     monkeypatch.setattr(app_module, "_groq_messages", provider)
     response = app_module.app.test_client().post(
@@ -222,7 +223,7 @@ def test_unified_execute_falls_back_to_rules_when_model_decision_is_invalid(monk
         calls.append(max_tokens)
         if max_tokens == 220:
             return {"text": "not-json"}
-        return {"text": "Respuesta de reserva", "model": "fake-model"}
+        return {"text": json.dumps({"action": "final", "answer": "Respuesta de reserva"}), "model": "fake-model"}
 
     monkeypatch.setattr(app_module, "_groq_messages", provider)
     response = app_module.app.test_client().post(
@@ -232,7 +233,7 @@ def test_unified_execute_falls_back_to_rules_when_model_decision_is_invalid(monk
     assert response.status_code == 200
     assert body["answer"] == "Respuesta de reserva"
     assert body["route_source"] == "fallback"
-    assert calls == [220, 2400]
+    assert calls == [220, 1800]
 
 
 def test_unified_execute_rejects_empty_input():
