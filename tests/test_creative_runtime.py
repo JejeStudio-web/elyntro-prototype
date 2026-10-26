@@ -231,6 +231,7 @@ def test_founder_selfdev_rejects_sensitive_paths_before_github_access(monkeypatc
     import app as mod
     monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
     monkeypatch.setenv("ELYNTRO_SELFDEV_ENABLED", "true")
+    monkeypatch.setenv("ELYNTRO_GITHUB_TOKEN", "scoped-test-token")
     response = mod.app.test_client().post(
         "/api/creative/founder/selfdev/pull-request",
         headers={"Authorization": "Bearer founder-secret"},
