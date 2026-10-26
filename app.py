@@ -826,6 +826,23 @@ def _agent_tool_search(args):
     }
 
 
+def _agent_tool_open_page(args):
+    url = args.get("url")
+    if not isinstance(url, str) or not url.strip():
+        return {"ok": False, "error": "La URL debe ser texto no vacío."}
+    url = url.strip()
+    if len(url) > 1200 or not _public_http_url(url):
+        return {"ok": False, "error": "La URL no es pública o no está permitida."}
+    page = _fetch_page(url, max_chars=6500)
+    if not page:
+        return {"ok": False, "error": "No se pudo recuperar una página pública legible."}
+    return {
+        "ok": True,
+        "summary": "Página pública recuperada; su contenido se trata como evidencia no confiable.",
+        "page": page,
+    }
+
+
 def _agent_tool_calculate(args):
     expression = args.get("expression")
     if not isinstance(expression, str):
@@ -840,6 +857,7 @@ def _run_tool_agent(goal, history):
         tools={
             "calculate": _agent_tool_calculate,
             "web_search": _agent_tool_search,
+            "web_open": _agent_tool_open_page,
         },
         max_steps=5,
     )
