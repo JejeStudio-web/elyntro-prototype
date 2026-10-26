@@ -35,7 +35,10 @@ def _config():
         return {"provider": provider, "supported": False, "configured": False, "model": None, "base_url": ""}
     key_env, model_env, default_model, default_url = defaults[provider]
     key = os.getenv(key_env, "").strip()
-    model = os.getenv(model_env, default_model).strip()
+    if provider == "ollama":
+        model = os.getenv("ELYNTRO_MODEL", os.getenv("OLLAMA_MODEL", default_model)).strip()
+    else:
+        model = os.getenv(model_env, default_model).strip()
     base_url = default_url.rstrip("/")
     if provider == "openai-compatible" and not base_url:
         base_url = ""
