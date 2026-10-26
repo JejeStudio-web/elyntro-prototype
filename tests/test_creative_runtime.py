@@ -344,3 +344,49 @@ def test_comfyui_replaces_positive_prompt_without_overwriting_negative(monkeypat
     )
     assert response.status_code == 202
     assert response.get_json()["prompt_id"] == "job-123"
+
+
+def test_playwright_enabled_still_fails_closed_without_private_worker(monkeypatch):
+    import app as mod
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-api-key")
+    monkeypatch.setenv("ELYNTRO_PLAYWRIGHT_ENABLED", "true")
+    monkeypatch.delenv("ELYNTRO_BROWSER_WORKER_URL", raising=False)
+    monkeypatch.delenv("ELYNTRO_BROWSER_WORKER_TOKEN", raising=False)
+    response = mod.app.test_client().post("/api/creative/browser/inspect",
+        headers={"Authorization": "Bearer test-api-key"},
+        json={"url": "https://example.com"})
+    assert response.status_code == 503
+    assert "worker privado" in response.get_json()["error"]
+
+
+def test_playwright_routes_proxy_to_private_worker(monkeypatch):
+    import app as mod
+    import creative_runtime
+    from contextlib import closing
+    from io import BytesIO
+
+    seen = {}
+    class FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, size=-1): return b'{"ok":true,"mode":"isolated_ephemeral","actions_taken":[]}'
+    def fake_urlopen(req, timeout):
+        seen["url"] = req.full_url
+        seen["auth"] = req.get_header("Authorization")
+        seen["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-api-key")
+    monkeypatch.setenv("ELYNTRO_PLAYWRIGHT_ENABLED", "true")
+    monkeypatch.setenv("ELYNTRO_BROWSER_WORKER_URL", "elyntro-browser-worker:10000")
+    monkeypatch.setenv("ELYNTRO_BROWSER_WORKER_TOKEN", "worker-secret")
+    monkeypatch.setattr(creative_runtime.urllib.request, "urlopen", fake_urlopen)
+    response = mod.app.test_client().post("/api/creative/browser/inspect",
+        headers={"Authorization": "Bearer test-api-key"},
+        json={"url": "https://example.com"})
+    assert response.status_code == 200
+    assert response.get_json()["mode"] == "isolated_ephemeral"
+    assert seen["url"] == "http://elyntro-browser-worker:10000/v1/inspect"
+    assert seen["auth"] == "Bearer worker-secret"
+    assert seen["timeout"] == 35
