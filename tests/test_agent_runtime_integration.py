@@ -36,7 +36,7 @@ def test_agent_calculator_rejects_dynamic_code():
     result = mod._agent_tool_calculate({"expression": "__import__('os').system('echo unsafe')"})
 
     assert result["ok"] is False
-    assert "no se permiten" in result["error"].casefold()
+    assert "se permiten operaciones aritméticas básicas" in result["error"].casefold()
 
 
 def test_agent_search_rejects_non_text_queries():
