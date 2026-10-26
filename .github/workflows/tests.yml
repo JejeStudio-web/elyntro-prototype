@@ -1,0 +1,28 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, "feature/**", "phase-1/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.lock
+      - name: Run tests
+        run: python -m pytest -q
