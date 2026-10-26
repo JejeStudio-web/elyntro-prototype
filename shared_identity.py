@@ -111,6 +111,8 @@ def _unavailable():
 
 @identity_api.post("/register")
 def register():
+    if os.environ.get("ELYNTRO_REGISTRATION_ENABLED", "false").lower() != "true":
+        return jsonify({"error": "El registro público está desactivado; habilítalo explícitamente en Render."}), 403
     if not _db_ready():
         return _unavailable()
     try:
