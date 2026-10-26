@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
+from elyntro_api_v1 import api_v1
 from werkzeug.middleware.proxy_fix import ProxyFix
 from elyntro import CognitiveLoop, EvidenceVerifier
 from elyntro.contracts import TaskRequest
@@ -45,6 +46,7 @@ def resolve_db_path() -> Path:
 
 DB_PATH = str(resolve_db_path())
 app = Flask(__name__, static_folder="static")
+app.register_blueprint(api_v1)
 # Render sits behind one trusted reverse proxy; normalize client IP and HTTPS metadata.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
