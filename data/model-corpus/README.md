@@ -1,0 +1,3 @@
+# Training corpus
+
+Place UTF-8 .txt or .md documents here only when you have permission or an appropriate license to use them for model training. Do not commit large corpora or trained weights to Git. Store them in controlled storage and record provenance, license, filtering, and deduplication metadata. Keep private, personal, or sensitive data out unless there is a documented lawful basis, consent, and a privacy plan. The initial trainer can read this directory, but no corpus is bundled.
