@@ -84,8 +84,13 @@ def test_founder_proposals_can_be_listed_and_reviewed_without_applying(monkeypat
     assert listed.status_code == 200
     assert listed.get_json()["proposals"][0]["id"] == proposal_id
 
+    missing_review_hash = client.post(f"/api/creative/founder/proposals/{proposal_id}/review",
+                                        headers=headers, json={"decision": "approve"})
+    assert missing_review_hash.status_code == 409
+
+    patch_hash = created.get_json()["proposal"]["patch_sha256"]
     approved = client.post(f"/api/creative/founder/proposals/{proposal_id}/review",
-                           headers=headers, json={"decision": "approve"})
+                           headers=headers, json={"decision": "approve", "reviewed_patch_sha256": patch_hash})
     assert approved.status_code == 200
     body = approved.get_json()
     assert body["proposal"]["status"] == "approved_for_manual_implementation"
