@@ -64,3 +64,53 @@ def test_studio_route_serves_threejs_editor():
     assert response.status_code == 200
     assert "three.module.js" in response.get_data(as_text=True)
     assert "Founder Mode" in response.get_data(as_text=True)
+
+
+
+def test_founder_proposals_can_be_listed_and_reviewed_without_applying(monkeypatch, tmp_path):
+    import app as mod
+    monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
+    monkeypatch.setenv("ELYNTRO_PROPOSAL_DIR", str(tmp_path))
+    client = mod.app.test_client()
+    headers = {"Authorization": "Bearer founder-secret"}
+    created = client.post("/api/creative/founder/proposals", headers=headers, json={
+        "title": "Improve scene editor", "rationale": "Add durable review lifecycle",
+        "patch": "diff --git a/static/creative-studio.html b/static/creative-studio.html"
+    })
+    assert created.status_code == 201
+    proposal_id = created.get_json()["proposal"]["id"]
+
+    listed = client.get("/api/creative/founder/proposals", headers=headers)
+    assert listed.status_code == 200
+    assert listed.get_json()["proposals"][0]["id"] == proposal_id
+
+    approved = client.post(f"/api/creative/founder/proposals/{proposal_id}/review",
+                           headers=headers, json={"decision": "approve"})
+    assert approved.status_code == 200
+    body = approved.get_json()
+    assert body["proposal"]["status"] == "approved_for_manual_implementation"
+    assert body["proposal"]["policy"]["auto_apply"] is False
+    assert "no aplica" in body["note"].lower()
+
+    duplicate = client.post(f"/api/creative/founder/proposals/{proposal_id}/review",
+                            headers=headers, json={"decision": "reject"})
+    assert duplicate.status_code == 409
+
+
+def test_founder_proposal_listing_requires_founder_token(monkeypatch):
+    import app as mod
+    monkeypatch.setenv("ELYNTRO_FOUNDER_TOKEN", "founder-secret")
+    response = mod.app.test_client().get("/api/creative/founder/proposals")
+    assert response.status_code == 401
+
+
+def test_studio_contains_scene_transform_and_export_controls():
+    import app as mod
+    response = mod.app.test_client().get("/creative-studio")
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'id="posX"' in html
+    assert 'id="saveScene"' in html
+    assert 'id="exportScene"' in html
+    assert 'id="checkGeneration"' in html
+    assert 'id="clickBrowserButton"' in html
