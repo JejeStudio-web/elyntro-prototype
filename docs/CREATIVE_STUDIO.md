@@ -17,8 +17,12 @@ Set secrets in the deployment environment; never commit tokens.
 - `COMFYUI_BASE_URL`: operator-configured ComfyUI origin, e.g. `http://127.0.0.1:8188` only when ComfyUI is reachable from the same host/container. A cloud Render service cannot reach a workstation's localhost.
 - `ELYNTRO_PLAYWRIGHT_ENABLED=true`: explicit opt-in to browser automation. Default is disabled.
 - `ELYNTRO_BROWSER_ALLOWLIST=docs.example.com,developer.mozilla.org`: comma-separated allowed hostnames. Use only domains the operator authorizes.
-- `ELYNTRO_FOUNDER_TOKEN`: separate token for Founder Mode.
+- `ELYNTRO_FOUNDER_TOKEN`: separate token for Founder Mode. The workspace routes prompts beginning with `[245jg&]` into the authenticated, model-assisted patch-proposal workflow; the token is stored only in the current browser tab session.
 - `ELYNTRO_PROPOSAL_DIR=/var/data/elyntro-proposals`: durable proposal storage path if a persistent disk is mounted. The default under `/tmp` is ephemeral.
+- `ELYNTRO_SELFDEV_ENABLED=true`: explicit opt-in for repository PR creation; disabled by default.
+- `ELYNTRO_GITHUB_TOKEN`: a narrowly scoped GitHub App installation token (recommended) or fine-grained token with Contents: Read/Write and Pull requests: Read/Write on the single repository.
+- `ELYNTRO_GITHUB_REPOSITORY=JejeStudio-web/elyntro-prototype`: fixed owner/repository target. The client cannot choose another repository.
+- `ELYNTRO_GITHUB_BASE_BRANCH=main`: target base branch. The runtime creates a unique branch, commits only allowlisted paths and opens a draft PR. It never merges or deploys.
 
 Install browser support separately from the base web runtime:
 
@@ -65,6 +69,8 @@ Lifecycle: proposal → hash and persist → human review → approved for manua
 - `POST /api/creative/browser/act`
 - `POST /api/creative/founder/proposals`
 - `GET /api/creative/founder/proposals`
+- `GET /api/creative/founder/proposals/<proposal_id>`
 - `POST /api/creative/founder/proposals/<proposal_id>/review`
+- `POST /api/creative/founder/selfdev/pull-request`
 
 All endpoints above, except the public feature-status endpoint, require the appropriate Elyntro API or Founder token.
