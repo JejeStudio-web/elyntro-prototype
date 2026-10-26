@@ -128,7 +128,58 @@ def comfyui_history(prompt_id: str):
             data = json.loads(response.read(128_000).decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
         return jsonify({"ok": False, "error": "No se pudo consultar el historial de ComfyUI.", "detail": type(exc).__name__}), 502
-    return jsonify({"ok": True, "history": data.get(prompt_id, {})})
+    record = data.get(prompt_id, {})
+    images = []
+    outputs = record.get("outputs", {}) if isinstance(record, dict) else {}
+    if isinstance(outputs, dict):
+        for node_id, node in outputs.items():
+            for image in (node.get("images", []) if isinstance(node, dict) else []):
+                if not isinstance(image, dict):
+                    continue
+                filename, subfolder, kind = image.get("filename"), image.get("subfolder", ""), image.get("type", "output")
+                if isinstance(filename, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,180}", filename) and isinstance(subfolder, str) and len(subfolder) <= 240 and kind == "output":
+                    images.append({"node_id": str(node_id)[:40], "filename": filename, "subfolder": subfolder,
+                                   "type": "output", "url": "/api/creative/comfyui/view/" + prompt_id + "/" + urllib.parse.quote(filename, safe="")})
+    return jsonify({"ok": True, "history": record, "images": images[:30]})
+
+
+@creative_api.get("/comfyui/view/<prompt_id>/<filename>")
+def comfyui_view(prompt_id: str, filename: str):
+    if not _authorized():
+        return _json_error("Se requiere una clave API de Elyntro configurada.", 401)
+    base = _comfy_base()
+    if not base:
+        return _json_error("ComfyUI no está configurado.", 503)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", prompt_id) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,180}", filename):
+        return _json_error("Identificador o nombre de imagen no válido.", 400)
+    try:
+        history_req = urllib.request.Request(base + "/history/" + urllib.parse.quote(prompt_id, safe=""))
+        with urllib.request.urlopen(history_req, timeout=8) as response:
+            record = json.loads(response.read(128_000).decode("utf-8")).get(prompt_id, {})
+        match = None
+        for node in (record.get("outputs", {}) if isinstance(record, dict) else {}).values():
+            for item in (node.get("images", []) if isinstance(node, dict) else []):
+                if isinstance(item, dict) and item.get("filename") == filename and item.get("type", "output") == "output":
+                    match = item
+                    break
+            if match:
+                break
+        if not match:
+            return _json_error("La imagen no figura en el historial de este trabajo.", 404)
+        subfolder = match.get("subfolder", "")
+        if not isinstance(subfolder, str) or len(subfolder) > 240 or ".." in subfolder.split("/") or subfolder.startswith("/"):
+            return _json_error("Ruta de salida no válida.", 400)
+        query = urllib.parse.urlencode({"filename": filename, "subfolder": subfolder, "type": "output"})
+        image_req = urllib.request.Request(base + "/view?" + query, headers={"Accept": "image/png,image/jpeg,image/webp"})
+        with urllib.request.urlopen(image_req, timeout=12) as response:
+            payload = response.read(8_000_001)
+            media_type = response.headers.get_content_type()
+        if len(payload) > 8_000_000 or media_type not in {"image/png", "image/jpeg", "image/webp"}:
+            return _json_error("La imagen supera el límite de 8 MB o tiene un formato no admitido.", 413)
+        from flask import Response
+        return Response(payload, mimetype=media_type, headers={"Cache-Control": "private, max-age=60", "X-Content-Type-Options": "nosniff"})
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return jsonify({"ok": False, "error": "No se pudo recuperar la imagen de ComfyUI.", "detail": type(exc).__name__}), 502
 
 
 @creative_api.post("/browser/inspect")
