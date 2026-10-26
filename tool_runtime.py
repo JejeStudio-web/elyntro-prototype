@@ -4,10 +4,14 @@ The runtime records observable events and never equates model claims with tool e
 from __future__ import annotations
 import ast
 import json
+import logging
 import math
 import re
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ToolEvent:
@@ -38,19 +42,83 @@ class ToolRuntime:
                 transcript.append({"role": item["role"], "content": item["content"][:4000]})
         transcript.append({"role": "user", "content": goal})
         last_model = None
+        invalid_response_repaired = False
         for step in range(self.max_steps):
-            response = self.model_call(transcript, max_tokens=1800, temperature=0.1, json_mode=True)
+            try:
+                response = self.model_call(transcript, max_tokens=1800, temperature=0.1, json_mode=True)
+            except Exception as exc:
+                error_id = uuid.uuid4().hex
+                logger.error("Tool decision request failed: error_id=%s exception_type=%s",
+                             error_id, type(exc).__name__)
+                diagnostic = {
+                    "code": "model_request_failed",
+                    "message": "No se pudo contactar con el proveedor para decidir el siguiente paso.",
+                    "stage": "planning",
+                    "retryable": True,
+                    "error_id": error_id,
+                }
+                return self._result(False, diagnostic["message"], events, None,
+                                    "provider_error", artifacts, sources, diagnostic)
             last_model = response
             raw = response.get("text") if isinstance(response, dict) else None
-            if not raw:
-                return self._result(False, "No se pudo obtener una decisión válida del modelo.", events, response, "provider_error", artifacts, sources)
+            if not isinstance(raw, str) or not raw.strip():
+                code = response.get("error_code") if isinstance(response, dict) else None
+                known_codes = {
+                    "provider_not_configured": ("El proveedor de modelos no está configurado.", False),
+                    "provider_authentication_failed": ("El proveedor rechazó la autenticación.", False),
+                    "provider_permission_denied": ("La cuenta no tiene permiso para usar el modelo.", False),
+                    "provider_rate_limited": ("El proveedor ha limitado temporalmente las solicitudes.", True),
+                    "provider_timeout": ("El proveedor agotó el tiempo de espera.", True),
+                    "provider_connection_failed": ("No se pudo conectar con el proveedor.", True),
+                    "provider_unavailable": ("El proveedor no está disponible temporalmente.", True),
+                    "provider_empty_response": ("El proveedor no devolvió contenido utilizable.", True),
+                }
+                code = code if isinstance(code, str) and code in known_codes else "provider_empty_response"
+                message, retryable = known_codes.get(code, known_codes["provider_empty_response"])
+                diagnostic = {
+                    "code": code,
+                    "message": message,
+                    "stage": "planning",
+                    "retryable": retryable,
+                    "error_id": uuid.uuid4().hex,
+                }
+                return self._result(False, message, events, response, "provider_error",
+                                    artifacts, sources, diagnostic)
             try:
                 decision = json.loads(raw)
             except (ValueError, TypeError):
-                # One explicit repair attempt is safer than guessing what tool the model intended.
+                if invalid_response_repaired:
+                    message = "El modelo devolvió una decisión que no cumple el formato JSON requerido."
+                    diagnostic = {
+                        "code": "invalid_model_decision",
+                        "message": message,
+                        "stage": "planning",
+                        "retryable": False,
+                        "error_id": uuid.uuid4().hex,
+                    }
+                    return self._result(False, message, events, response, "invalid_decision",
+                                        artifacts, sources, diagnostic)
+                invalid_response_repaired = True
                 transcript.append({"role": "assistant", "content": raw[:5000]})
                 transcript.append({"role": "user", "content": 'La respuesta no era JSON válido. Devuelve solo JSON con action="final" y answer, o action="tool" y tool/arguments.'})
                 continue
+            if not isinstance(decision, dict):
+                if invalid_response_repaired:
+                    message = "El modelo no devolvió un objeto JSON de decisión."
+                    diagnostic = {
+                        "code": "invalid_model_decision",
+                        "message": message,
+                        "stage": "planning",
+                        "retryable": False,
+                        "error_id": uuid.uuid4().hex,
+                    }
+                    return self._result(False, message, events, response, "invalid_decision",
+                                        artifacts, sources, diagnostic)
+                invalid_response_repaired = True
+                transcript.append({"role": "assistant", "content": raw[:5000]})
+                transcript.append({"role": "user", "content": 'La respuesta debe ser un objeto JSON. Devuelve solo JSON con action="final" y answer, o action="tool" y tool/arguments.'})
+                continue
+            invalid_response_repaired = False
             action = decision.get("action")
             if action == "final":
                 answer = decision.get("answer")
@@ -111,8 +179,8 @@ class ToolRuntime:
           "No digas que un objetivo está verificado solo porque el modelo lo afirme.")
 
     @staticmethod
-    def _result(ok, answer, events, response, status, artifacts=None, sources=None):
-        return {"ok": ok, "answer": answer, "status": status,
+    def _result(ok, answer, events, response, status, artifacts=None, sources=None, error=None):
+        result = {"ok": ok, "answer": answer, "status": status,
           "events": [e.as_dict() for e in events],
           "artifacts": artifacts or [],
           "sources": sources or [],
@@ -123,6 +191,9 @@ class ToolRuntime:
           "provider": "groq", "returned_model": response.get("model") if isinstance(response, dict) else None,
           "requested_model": response.get("requested_model") if isinstance(response, dict) else None,
           "response_id": response.get("response_id") if isinstance(response, dict) else None}
+        if error is not None:
+            result["error"] = error
+        return result
 
 # Deliberately small arithmetic grammar; never use eval() or execute generated Python.
 def safe_calculate(expression: str) -> dict:

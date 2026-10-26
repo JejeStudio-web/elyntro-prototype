@@ -3,6 +3,8 @@ import os
 import re
 import html as html_escape
 import json
+import logging
+import uuid
 from html.parser import HTMLParser
 import urllib.parse
 import urllib.error
@@ -18,6 +20,7 @@ from elyntro.store import SQLiteStore
 from elyntro.task_executor import StepResult, TaskExecutor
 from search_providers import TavilySearchProvider, fetch_public_http, is_public_http_url
 
+logger = logging.getLogger(__name__)
 BASE = Path(__file__).resolve().parent
 
 
@@ -88,7 +91,8 @@ def _groq_chat(goal: str, direct: bool = False) -> dict:
     """Call Groq chat completions. The API response, not model-generated text, is the source of model metadata."""
     api_key = os.environ.get("GROQ_API_KEY", "").strip()
     if not api_key:
-        return {"configured": False, "text": None, "model": None, "error": "GROQ_API_KEY no está configurada."}
+        return {"configured": False, "text": None, "model": None, "error": "GROQ_API_KEY no está configurada.",
+                "error_code": "provider_not_configured", "retryable": False}
     model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b").strip()
     system_prompt = (
         "Eres Elyntro. Responde en español salvo que el usuario pida otro idioma. "
@@ -119,10 +123,23 @@ def _groq_chat(goal: str, direct: bool = False) -> dict:
     req.add_unredirected_header("Authorization", f"Bearer {api_key}")
     try:
         with urllib.request.urlopen(req, timeout=45) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        answer = data["choices"][0]["message"]["content"]
+            raw_response = response.read().decode("utf-8")
+        try:
+            data = json.loads(raw_response)
+        except (ValueError, TypeError):
+            return {"configured": True, "text": None, "model": model, "requested_model": model,
+                    "error": "Groq devolvió JSON no válido.", "error_code": "provider_invalid_json",
+                    "retryable": False}
+        try:
+            answer = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            return {"configured": True, "text": None, "model": model, "requested_model": model,
+                    "error": "La respuesta del proveedor tenía una estructura inesperada.",
+                    "error_code": "provider_invalid_response", "retryable": False}
         if not isinstance(answer, str) or not answer.strip():
-            raise ValueError("empty response")
+            return {"configured": True, "text": None, "model": model, "requested_model": model,
+                    "error": "El proveedor devolvió una respuesta vacía.",
+                    "error_code": "provider_empty_response", "retryable": True}
         # This value comes from Groq's API response, never from the model's prose.
         returned_model = data.get("model") if isinstance(data.get("model"), str) else None
         return {
@@ -168,11 +185,21 @@ def _groq_chat(goal: str, direct: bool = False) -> dict:
             diagnostic += f" · {detail}"
         else:
             diagnostic += " · Groq devolvió un cuerpo de error vacío."
-        return {"configured": True, "text": None, "model": model, "requested_model": model, "error": diagnostic}
-    except (urllib.error.URLError, TimeoutError):
-        return {"configured": True, "text": None, "model": model, "requested_model": model, "error": "No se pudo conectar con Groq (conexión o tiempo de espera)."}
-    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
-        return {"configured": True, "text": None, "model": model, "requested_model": model, "error": "La respuesta de Groq no tenía el formato esperado."}
+        error_code = (
+            "provider_authentication_failed" if exc.code == 401 else
+            "provider_permission_denied" if exc.code == 403 else
+            "provider_rate_limited" if exc.code == 429 else
+            "provider_unavailable" if exc.code >= 500 else
+            "provider_http_error"
+        )
+        return {"configured": True, "text": None, "model": model, "requested_model": model, "error": diagnostic,
+                "error_code": error_code, "retryable": exc.code == 429 or exc.code >= 500}
+    except (urllib.error.URLError, TimeoutError) as exc:
+        timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+        return {"configured": True, "text": None, "model": model, "requested_model": model,
+                "error": "Groq agotó el tiempo de espera." if timed_out else "No se pudo conectar con Groq.",
+                "error_code": "provider_timeout" if timed_out else "provider_connection_failed",
+                "retryable": True}
 
 def handle_analyze(inputs, context):
     goal = str(inputs.get("goal", ""))
@@ -238,8 +265,26 @@ def handle_analyze(inputs, context):
     return StepResult(output={"analysis": summary, "external_model_used": bool(result["text"])}, artifacts=[artifact])
 
 def handle_create(inputs, context):
-    artifact = _goal_artifact(str(inputs.get("goal", "")))
-    return StepResult(output={"created": artifact["name"], "mode": "deterministic-template"}, artifacts=[artifact])
+    """Generate a real artifact with the configured model; never disguise provider failure as success."""
+    goal = str(inputs.get("goal", "")).strip()
+    if os.environ.get("GROQ_API_KEY", "").strip():
+        artifact, provider_result = _create_with_model(goal)
+        if not artifact:
+            raise RuntimeError(provider_result.get("error") or "El modelo no pudo generar un artefacto válido.")
+        checks = _validate_artifact(artifact)
+        artifact["validation"] = checks
+        return StepResult(
+            output={"created": artifact["name"], "mode": "model-generated",
+                    "static_validation": checks.get("status", "not_checked")},
+            artifacts=[artifact],
+            evidence=[{"type": "static_artifact_validation", "result": checks}],
+        )
+    artifact = _goal_artifact(goal)
+    return StepResult(
+        output={"created": artifact["name"], "mode": "deterministic-template",
+                "limitation": "GROQ_API_KEY no está configurada; el contenido no se ha generado con un modelo."},
+        artifacts=[artifact],
+    )
 
 def handle_verify(inputs, context):
     return StepResult(output={"verification_requested": True}, evidence=[{"criterion": CRITERION, "detail": "El artefacto debe existir y tener contenido no vacío; el validador independiente lo inspeccionará."}])
@@ -331,6 +376,7 @@ def home():
     return send_from_directory(app.static_folder, "index.html")
 
 @app.get("/api/health")
+@app.get("/api/v1/health")
 def health():
     search_provider = _search_provider_name()
     search_configured = search_provider == "duckduckgo" or (
@@ -368,7 +414,8 @@ def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=Fals
     """Provider adapter returning trusted API metadata separately from generated content."""
     api_key = os.environ.get("GROQ_API_KEY", "").strip()
     if not api_key:
-        return {"text": None, "error": "GROQ_API_KEY no está configurada."}
+        return {"text": None, "error": "GROQ_API_KEY no está configurada.",
+                "error_code": "provider_not_configured", "retryable": False}
     model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b").strip()
     body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
     if json_mode:
@@ -382,10 +429,20 @@ def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=Fals
     req.add_unredirected_header("Authorization", f"Bearer {api_key}")
     try:
         with urllib.request.urlopen(req, timeout=55) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        text = data["choices"][0]["message"]["content"]
+            raw_response = response.read().decode("utf-8")
+        try:
+            data = json.loads(raw_response)
+        except (ValueError, TypeError):
+            return {"text": None, "error": "Groq devolvió JSON no válido.",
+                    "error_code": "provider_invalid_json", "retryable": False}
+        try:
+            text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            return {"text": None, "error": "La respuesta del proveedor tenía una estructura inesperada.",
+                    "error_code": "provider_invalid_response", "retryable": False}
         if not isinstance(text, str) or not text.strip():
-            return {"text": None, "error": "El proveedor devolvió una respuesta vacía."}
+            return {"text": None, "error": "El proveedor devolvió una respuesta vacía.",
+                    "error_code": "provider_empty_response", "retryable": True}
         return {"text": text.strip(), "model": data.get("model") or model,
                 "requested_model": model, "response_id": data.get("id"), "usage": data.get("usage")}
     except urllib.error.HTTPError as exc:
@@ -398,11 +455,51 @@ def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=Fals
         detail = str(detail).replace(api_key, "[clave oculta]")
         detail = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1[oculto]", detail)
         detail = re.sub(r"(?i)gsk_[A-Za-z0-9_-]{8,}", "[clave oculta]", detail)[:450]
-        return {"text": None, "error": f"Groq devolvió HTTP {exc.code}" + (f": {detail}" if detail else "")}
-    except (urllib.error.URLError, TimeoutError):
-        return {"text": None, "error": "No se pudo conectar con Groq o se agotó el tiempo de espera."}
-    except (KeyError, IndexError, TypeError, ValueError):
-        return {"text": None, "error": "La respuesta del proveedor tenía un formato inesperado."}
+        error_code = (
+            "provider_authentication_failed" if exc.code == 401 else
+            "provider_permission_denied" if exc.code == 403 else
+            "provider_rate_limited" if exc.code == 429 else
+            "provider_unavailable" if exc.code >= 500 else
+            "provider_http_error"
+        )
+        return {"text": None, "error": f"Groq devolvió HTTP {exc.code}" + (f": {detail}" if detail else ""),
+                "error_code": error_code, "retryable": exc.code == 429 or exc.code >= 500}
+    except (urllib.error.URLError, TimeoutError) as exc:
+        timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+        return {"text": None,
+                "error": "Groq agotó el tiempo de espera." if timed_out else "No se pudo conectar con Groq.",
+                "error_code": "provider_timeout" if timed_out else "provider_connection_failed",
+                "retryable": True}
+
+
+def _provider_http_status(result):
+    code = result.get("error_code")
+    if code == "provider_not_configured":
+        return 503
+    if code == "provider_rate_limited":
+        return 429
+    return 502
+
+
+def _api_failure(message, *, code, stage, retryable, status, route=None, exception=None, extra=None):
+    error_id = uuid.uuid4().hex
+    if exception is not None:
+        logger.exception("Execution failed: error_id=%s stage=%s", error_id, stage)
+    else:
+        logger.warning("Request failed: error_id=%s code=%s stage=%s", error_id, code, stage)
+    detail = {
+        "code": code,
+        "message": message,
+        "stage": stage,
+        "retryable": bool(retryable),
+        "error_id": error_id,
+    }
+    body = {"ok": False, "error": message, "error_detail": detail, "error_id": error_id}
+    if route is not None:
+        body["route"] = route
+    if extra:
+        body.update(extra)
+    return jsonify(body), status
 
 
 def _search_provider_name():
@@ -612,10 +709,10 @@ def _smart_route(goal, history):
     if result.get("text"):
         try:
             data = json.loads(result["text"])
-            route = data.get("route")
+            route = data.get("route") if isinstance(data, dict) else None
             if route in {"answer", "research", "create", "analyze"}:
                 return route, str(data.get("reason", "Clasificación del modelo"))[:180], str(data.get("search_query", ""))[:400], "model"
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, AttributeError):
             pass
     fallback = classify_request(goal)
     return ("answer" if fallback == "chat" else fallback), "Ruta de reserva por reglas: el clasificador del modelo no devolvió JSON válido.", goal, "fallback"
@@ -664,6 +761,7 @@ def _create_with_model(goal):
 
 @app.post("/api/agent/execute")
 @app.post("/api/execute")
+@app.post("/api/v1/agent/execute")
 def execute_unified():
     """Model-driven unified entry point with conversation context and optional live web retrieval."""
     payload = request.get_json(silent=True) or {}
@@ -679,24 +777,39 @@ def execute_unified():
     history = [m for m in history[-10:] if isinstance(m, dict) and m.get("role") in {"user", "assistant"} and isinstance(m.get("content"), str)]
 
     route = classify_request(goal)
+    route_reason = "Clasificación determinista por reglas."
+    route_source = "rules"
+    if route == "chat" and os.environ.get("GROQ_API_KEY", "").strip():
+        decision, route_reason, _, route_source = _smart_route(goal, history)
+        route = "chat" if decision == "answer" else decision
+
     if route == "chat":
-        result = _groq_chat(goal, direct=True)
+        result = _answer_with_context(goal, history)
         if not result.get("text"):
-            return jsonify({
-                "ok": False,
-                "route": route,
-                "error": result.get("error") or "El proveedor no devolvió respuesta.",
-                "provider": "groq",
-                "requested_model": result.get("requested_model"),
-                "verification": {
-                    "status": "not_applicable",
-                    "reason": "Respuesta conversacional sin ejecución de tarea autorizada."
-                }
-            }), 502
+            message = result.get("error") or "El proveedor no devolvió respuesta."
+            failure, status = _api_failure(
+                message,
+                code=result.get("error_code") or "provider_error",
+                stage="answer",
+                retryable=result.get("retryable", False),
+                status=_provider_http_status(result),
+                route=route,
+                extra={
+                    "provider": "groq",
+                    "requested_model": result.get("requested_model"),
+                    "verification": {
+                        "status": "not_applicable",
+                        "reason": "Respuesta conversacional sin ejecución de tarea autorizada."
+                    },
+                },
+            )
+            return failure, status
         return jsonify({
             "ok": True,
             "kind": "answer",
             "route": route,
+            "route_reason": route_reason,
+            "route_source": route_source,
             "answer": result["text"],
             "provider": "groq",
             "requested_model": result.get("requested_model"),
@@ -713,7 +826,18 @@ def execute_unified():
         constraints=["No afirmar uso de herramientas, proveedores o fuentes que no se hayan utilizado."],
         success_criteria=[CRITERION],
     )
-    result = loop.run(task_request, namespace="prototype")
+    try:
+        result = loop.run(task_request, namespace="prototype")
+    except Exception as exc:
+        return _api_failure(
+            "No se pudo completar la ejecución de la tarea.",
+            code="internal_execution_error",
+            stage="execution",
+            retryable=False,
+            status=500,
+            route=route,
+            exception=exc,
+        )
     task = result.task
     plan = [{"step_id": step.step_id, "name": step.name, "handler_key": step.handler_key}
             for step in result.plan.steps] if result.plan else []
@@ -722,8 +846,8 @@ def execute_unified():
         "ok": task.status.value == "succeeded",
         "kind": "task",
         "route": route,
-        "route_reason": "Plan persistido ejecutado mediante CognitiveLoop y TaskExecutor.",
-        "route_source": "canonical_cognitive_loop",
+        "route_reason": route_reason if route_source == "model" else "Plan persistido ejecutado mediante CognitiveLoop y TaskExecutor; ruta seleccionada por reglas.",
+        "route_source": route_source if route_source == "model" else "canonical_cognitive_loop",
         "task": task.to_dict(),
         "plan": plan,
         "events": events,
@@ -745,8 +869,15 @@ def direct_chat():
         return jsonify({"error": "La petición supera el límite de 10.000 caracteres."}), 400
     result = _groq_chat(goal.strip(), direct=True)
     if not result.get("text"):
-        return jsonify({"ok": False, "error": result.get("error"), "provider": "groq",
-                        "requested_model": result.get("requested_model")}), 502
+        failure, status = _api_failure(
+            result.get("error") or "El proveedor no devolvió respuesta.",
+            code=result.get("error_code") or "provider_error",
+            stage="answer",
+            retryable=result.get("retryable", False),
+            status=_provider_http_status(result),
+            extra={"provider": "groq", "requested_model": result.get("requested_model")},
+        )
+        return failure, status
     return jsonify({"ok": True, "answer": result["text"], "provider": "groq",
                     "requested_model": result.get("requested_model"),
                     "returned_model": result.get("model"), "response_id": result.get("response_id"),
