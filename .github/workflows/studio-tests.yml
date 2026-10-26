@@ -1,0 +1,33 @@
+name: Studio Validation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-studio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Parse Studio JavaScript module
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("static/studio.html").read_text(encoding="utf-8")
+          scripts = re.findall(r'<script type="module">(.*?)</script>', html, flags=re.DOTALL)
+          if len(scripts) != 1:
+              raise SystemExit(f"Expected one Studio module script, found {len(scripts)}")
+          Path("/tmp/elyntro-studio.js").write_text(scripts[0], encoding="utf-8")
+          PY
+          node --check /tmp/elyntro-studio.js
