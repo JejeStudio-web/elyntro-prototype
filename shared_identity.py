@@ -272,3 +272,26 @@ def sync_item(namespace, item_key):
     except Exception:
         current_app.logger.exception("Account-scoped sync failed")
         return jsonify({"error": "La persistencia compartida no está disponible"}), 503
+
+@identity_api.get("/sync/<namespace>")
+def list_sync_items(namespace):
+    if not _db_ready():
+        return _unavailable()
+    if namespace not in {"conversations", "memory", "artifacts", "projects", "preferences"}:
+        return jsonify({"error": "Espacio de datos no permitido"}), 400
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Se requiere iniciar sesión"}), 401
+    try:
+        with _connect() as db:
+            with db.cursor() as cur:
+                cur.execute("""SELECT item_key,payload,version,updated_at FROM elyntro_user_data
+                               WHERE user_id=%s AND namespace=%s ORDER BY updated_at DESC LIMIT 100""",
+                            (user["user_id"], namespace))
+                rows = cur.fetchall()
+        return jsonify({"items": [{"key": row[0], "data": row[1], "version": row[2],
+                                  "updated_at": row[3].isoformat()} for row in rows]})
+    except Exception:
+        current_app.logger.exception("Account-scoped sync listing failed")
+        return jsonify({"error": "La persistencia compartida no está disponible"}), 503
+
