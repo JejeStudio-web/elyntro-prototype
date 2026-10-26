@@ -56,7 +56,7 @@ def test_chat_completions_supports_streaming_and_rejects_unknown_models(monkeypa
     def fake_stream(messages, model, max_tokens, temperature, json_mode=False):
         observed.update(model=model, max_tokens=max_tokens, temperature=temperature, json_mode=json_mode,
                         messages=messages)
-        return Response('data: {"choices":[{"delta":{"content":"ok"}}]}\\n\\ndata: [DONE]\\n\\n',
+        return Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
                         mimetype="text/event-stream")
     monkeypatch.setattr(mod, "_stream_provider_completion", fake_stream)
     client = mod.app.test_client()
