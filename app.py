@@ -136,6 +136,9 @@ def _apply_api_limits():
         "/api/tasks": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/creative/founder/selfdev/pull-request": int(os.environ.get("ELYNTRO_RATE_LIMIT_SELFDEV_PER_MINUTE", "3")),
         "/api/creative/founder/proposals": int(os.environ.get("ELYNTRO_RATE_LIMIT_FOUNDER_PER_MINUTE", "10")),
+        "/api/identity/register": int(os.environ.get("ELYNTRO_RATE_LIMIT_REGISTER_PER_MINUTE", "3")),
+        "/api/identity/login": int(os.environ.get("ELYNTRO_RATE_LIMIT_LOGIN_PER_MINUTE", "8")),
+        "/api/identity/logout": int(os.environ.get("ELYNTRO_RATE_LIMIT_LOGIN_PER_MINUTE", "8")),
     }
     if request.method == "POST" and request.path.startswith("/api/creative/founder/"):
         limits.setdefault(request.path, int(os.environ.get("ELYNTRO_RATE_LIMIT_FOUNDER_PER_MINUTE", "10")))
