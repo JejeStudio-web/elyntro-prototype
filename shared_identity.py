@@ -261,7 +261,7 @@ def sync_item(namespace, item_key):
                     VALUES (%s,%s,%s,%s::jsonb,1)
                     ON CONFLICT(user_id,namespace,item_key) DO UPDATE SET
                     payload=EXCLUDED.payload, version=elyntro_user_data.version+1, updated_at=now()
-                    WHERE (%s::bigint IS NULL OR elyntro_user_data.version=%s)
+                    WHERE (%s::bigint IS NOT NULL AND elyntro_user_data.version=%s)
                     RETURNING version,updated_at""", (user["user_id"], namespace, item_key, encoded, expected, expected))
                 row = cur.fetchone()
                 if not row:
