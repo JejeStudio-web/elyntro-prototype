@@ -432,6 +432,15 @@
           pending.article.querySelector(".message-head span:last-child").textContent = "Respuesta";
           pending.body.append(element("p", "", data.answer || ""));
           addSources(pending.body, data.sources);
+          if (Array.isArray(data.events) && data.events.length) {
+            const eventCard = addCard(pending.body, `Registro de herramientas · ${data.events.length}`);
+            const list = element("ul");
+            for (const event of data.events) {
+              const label = [event.tool || "herramienta", event.status || "estado desconocido", event.summary || ""].filter(Boolean).join(" · ");
+              list.append(element("li", "", label));
+            }
+            eventCard.append(list);
+          }
           const meta = addCard(pending.body, "Información de respuesta");
           meta.append(element("p", "", `Ruta: ${data.route || "no indicada"} · ${data.route_source || "origen no indicado"}`));
           meta.append(element("p", "", `Modelo devuelto por API: ${data.returned_model || "no indicado"}`));
