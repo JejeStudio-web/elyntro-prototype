@@ -5,12 +5,20 @@ import html as html_escape
 import json
 import logging
 import uuid
+import base64
+import hashlib
+import hmac
+import secrets
+import threading
+import time
+from collections import defaultdict, deque
 from html.parser import HTMLParser
 import urllib.parse
 import urllib.error
 import urllib.request
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 from elyntro import CognitiveLoop, EvidenceVerifier
 from elyntro.contracts import TaskRequest
 from elyntro.engine import Engine
@@ -37,7 +45,89 @@ def resolve_db_path() -> Path:
 
 DB_PATH = str(resolve_db_path())
 app = Flask(__name__, static_folder="static")
+# Render sits behind one trusted reverse proxy; normalize client IP and HTTPS metadata.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
 app.config["ELYNTRO_DB_PATH"] = DB_PATH
+
+def _load_task_token_secret() -> bytes:
+    """Load a stable capability-token key; keep a local key beside the SQLite DB if unset."""
+    configured = os.environ.get("ELYNTRO_TASK_TOKEN_SECRET", "").strip()
+    if configured:
+        return configured.encode("utf-8")
+    secret_path = Path(DB_PATH + ".task_secret")
+    secret_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(secret_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return secret_path.read_bytes().strip()
+    try:
+        secret = secrets.token_bytes(32)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(secret)
+        try:
+            os.chmod(secret_path, 0o600)
+        except OSError:
+            pass
+        return secret
+    except Exception:
+        try:
+            secret_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+_TASK_TOKEN_SECRET = _load_task_token_secret()
+_RATE_LIMITS = defaultdict(deque)
+_RATE_LIMIT_LOCK = threading.Lock()
+_RATE_WINDOW_SECONDS = 60
+
+def _task_access_token(task_id: str) -> str:
+    digest = hmac.new(_TASK_TOKEN_SECRET, task_id.encode("utf-8"), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+def _has_task_access(task_id: str) -> bool:
+    authorization = request.headers.get("Authorization", "")
+    bearer = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    supplied = bearer or request.headers.get("X-Elyntro-Task-Token", "")
+    if not supplied:
+        return False
+    return hmac.compare_digest(supplied, _task_access_token(task_id))
+
+@app.before_request
+def _apply_api_limits():
+    if request.path.startswith("/api/") and request.content_length is not None and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
+        return jsonify({"error": "La solicitud supera el límite de tamaño permitido."}), 413
+    limits = {
+        "/api/chat": int(os.environ.get("ELYNTRO_RATE_LIMIT_CHAT_PER_MINUTE", "20")),
+        "/api/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
+        "/api/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
+        "/api/v1/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
+        "/api/tasks": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
+    }
+    if request.method != "POST" or request.path not in limits:
+        return None
+    limit = max(1, min(limits[request.path], 600))
+    now = time.monotonic()
+    # ProxyFix normalizes the single Render proxy's X-Forwarded-For value.
+    client_ip = request.remote_addr or "unknown"
+    key = (client_ip, request.path)
+    with _RATE_LIMIT_LOCK:
+        bucket = _RATE_LIMITS[key]
+        while bucket and now - bucket[0] >= _RATE_WINDOW_SECONDS:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            return jsonify({"error": "Demasiadas solicitudes. Inténtalo de nuevo dentro de un minuto.",
+                            "error_detail": {"code": "rate_limit_exceeded", "retryable": True}}), 429
+        bucket.append(now)
+        if len(_RATE_LIMITS) > 10000:
+            for old_key in list(_RATE_LIMITS.keys())[:1000]:
+                old_bucket = _RATE_LIMITS[old_key]
+                while old_bucket and now - old_bucket[0] >= _RATE_WINDOW_SECONDS:
+                    old_bucket.popleft()
+                if not old_bucket:
+                    _RATE_LIMITS.pop(old_key, None)
+
 store = SQLiteStore(DB_PATH)
 engine = Engine(store)
 
@@ -925,6 +1015,7 @@ def execute_unified():
     body = {
         "ok": task.status.value == "succeeded",
         "kind": "task",
+        "task_access_token": _task_access_token(task.task_id),
         "route": route,
         "route_reason": route_reason if route_source == "model" else "Plan persistido ejecutado mediante CognitiveLoop y TaskExecutor; ruta seleccionada por reglas.",
         "route_source": route_source if route_source == "model" else "canonical_cognitive_loop",
@@ -974,10 +1065,12 @@ def create_task():
         return jsonify({"error": "El objetivo supera el límite de 10.000 caracteres."}), 400
     task_request = TaskRequest(goal=goal.strip(), constraints=["No afirmar que se han usado modelos o fuentes que no están configurados."], success_criteria=[CRITERION])
     result = loop.run(task_request, namespace="prototype")
-    return jsonify({"task": result.task.to_dict(), "plan": [{"step_id": s.step_id, "name": s.name, "handler_key": s.handler_key} for s in result.plan.steps] if result.plan else [], "verification": result.verification, "plan_review": result.plan_review}), 201
+    return jsonify({"task": result.task.to_dict(), "task_access_token": _task_access_token(result.task.task_id), "plan": [{"step_id": s.step_id, "name": s.name, "handler_key": s.handler_key} for s in result.plan.steps] if result.plan else [], "verification": result.verification, "plan_review": result.plan_review}), 201
 
 @app.get("/api/tasks/<task_id>")
 def get_task(task_id):
+    if not _has_task_access(task_id):
+        return jsonify({"error": "Se requiere el token de acceso de esta tarea."}), 403
     try:
         task = store.get_task(task_id)
         events = store.list_events(task_id)
@@ -987,6 +1080,8 @@ def get_task(task_id):
 
 @app.get("/api/tasks/<task_id>/artifacts/<path:name>")
 def get_artifact(task_id, name):
+    if not _has_task_access(task_id):
+        return jsonify({"error": "Se requiere el token de acceso de esta tarea."}), 403
     try:
         task = store.get_task(task_id)
     except (KeyError, ValueError):
