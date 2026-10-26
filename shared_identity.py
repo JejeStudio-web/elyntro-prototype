@@ -196,6 +196,10 @@ def me():
 
 @identity_api.post("/logout")
 def logout():
+    csrf_cookie = request.cookies.get("elyntro_csrf", "")
+    csrf_header = request.headers.get("X-Elyntro-CSRF", "")
+    if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+        return jsonify({"error": "Validación CSRF fallida"}), 403
     if not _db_ready():
         return _unavailable()
     token = request.cookies.get(SESSION_COOKIE, "")
