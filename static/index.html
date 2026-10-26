@@ -79,6 +79,12 @@
     }
     .nav button:hover, .nav button.active { border-color: #ffffff10; background: #ffffff0b; color: var(--text); }
     .nav-icon { width: 18px; color: var(--accent); text-align: center; }
+    .identity-box { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: #ffffff05; }
+    .identity-box strong { font-size: 12px; }
+    .identity-box input { width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
+    .identity-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+    .identity-actions button { border: 1px solid var(--line); border-radius: 8px; background: var(--panel-raised); color: var(--text); padding: 7px 9px; font-size: 11px; }
+    #identity-status { margin: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
     .side-note { margin-top: auto; padding: 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); font-size: 12px; }
     .side-note strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 12px; }
     .main { min-width: 0; display: flex; flex-direction: column; }
@@ -205,6 +211,17 @@
   <div class="shell">
     <aside class="sidebar" aria-label="Navegación principal">
       <div class="brand"><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
+      <section class="identity-box" aria-label="Cuenta Elyntro">
+        <strong>Cuenta y sincronización</strong>
+        <input id="identity-email" type="email" autocomplete="email" maxlength="254" placeholder="Correo electrónico" aria-label="Correo electrónico">
+        <input id="identity-password" type="password" autocomplete="current-password" minlength="12" maxlength="1024" placeholder="Contraseña (12 caracteres mínimo)" aria-label="Contraseña">
+        <div class="identity-actions">
+          <button id="identity-login" type="button">Entrar</button>
+          <button id="identity-register" type="button">Crear cuenta</button>
+          <button id="identity-logout" type="button" hidden>Cerrar sesión</button>
+        </div>
+        <p id="identity-status" role="status">Comprobando identidad compartida…</p>
+      </section>
       <button class="new-task" id="new-task" type="button">＋ &nbsp; Nueva tarea</button>
       <div>
         <p class="side-label">Espacio de trabajo</p>
@@ -278,6 +295,9 @@
     const conversation = $("conversation");
     const history = [];
     const HISTORY_KEY = "elyntro.conversation.v1";
+    let identityUser = null;
+    let sharedHistoryVersion = null;
+    let syncInFlight = false;
     const THEME_KEY = "elyntro.theme.v1";
     let busy = false;
     let attachedText = null;
@@ -575,7 +595,106 @@
     function saveHistory() {
       try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-12))); }
       catch { $("status").textContent = "El historial no se pudo guardar en este navegador."; }
+      if (identityUser) syncHistoryToServer();
     }
+
+    function csrfToken() {
+      const match = document.cookie.match(/(?:^|; )elyntro_csrf=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : "";
+    }
+
+    async function identityFetch(path, options = {}) {
+      const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+      if (options.method && options.method !== "GET") headers["X-Elyntro-CSRF"] = csrfToken();
+      const response = await fetch(path, { credentials: "same-origin", ...options, headers });
+      const data = await responseJson(response);
+      if (!response.ok) throw new Error(data.error || "Error de identidad (HTTP " + response.status + ").");
+      return data;
+    }
+
+    async function syncHistoryToServer() {
+      if (!identityUser || syncInFlight) return;
+      syncInFlight = true;
+      try {
+        const data = { messages: history.slice(-12) };
+        const response = await identityFetch("/api/identity/sync/conversations/main", {
+          method: "PUT", body: JSON.stringify({ data, expected_version: sharedHistoryVersion })
+        });
+        sharedHistoryVersion = response.version;
+        $("identity-status").textContent = "Sesión activa · historial sincronizado";
+      } catch (error) {
+        $("identity-status").textContent = "Sesión activa · sincronización pendiente: " + error.message;
+      } finally { syncInFlight = false; }
+    }
+
+    async function loadSharedHistory() {
+      try {
+        const data = await identityFetch("/api/identity/sync/conversations/main", { method: "GET" });
+        sharedHistoryVersion = data.version;
+        if (Array.isArray(data.data?.messages)) {
+          history.splice(0, history.length, ...data.data.messages.filter(item =>
+            item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-12));
+          conversation.replaceChildren();
+          for (const item of history) addMessage(item.role, "Historial sincronizado", item.content);
+          try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch {}
+        }
+        $("identity-status").textContent = "Sesión activa · historial sincronizado";
+      } catch (error) {
+        if (error.message.includes("No encontrado")) await syncHistoryToServer();
+        else $("identity-status").textContent = "Sesión activa · " + error.message;
+      }
+    }
+
+    async function refreshIdentity() {
+      try {
+        const data = await identityFetch("/api/identity/me", { method: "GET" });
+        identityUser = data.user;
+        $("identity-status").textContent = "Sesión: " + identityUser.email;
+        $("identity-login").hidden = true;
+        $("identity-register").hidden = true;
+        $("identity-email").hidden = true;
+        $("identity-password").hidden = true;
+        $("identity-logout").hidden = false;
+        await loadSharedHistory();
+      } catch (error) {
+        identityUser = null;
+        $("identity-status").textContent = error.message.includes("503")
+          ? "Sincronización aún no configurada en el servidor."
+          : "Inicia sesión para sincronizar entre dispositivos.";
+      }
+    }
+
+    async function submitIdentity(mode) {
+      const email = $("identity-email").value.trim();
+      const password = $("identity-password").value;
+      try {
+        const data = await identityFetch("/api/identity/" + mode, {
+          method: "POST", body: JSON.stringify({ email, password })
+        });
+        identityUser = data.user;
+        $("identity-password").value = "";
+        $("identity-status").textContent = "Sesión iniciada: " + identityUser.email;
+        $("identity-login").hidden = true;
+        $("identity-register").hidden = true;
+        $("identity-email").hidden = true;
+        $("identity-password").hidden = true;
+        $("identity-logout").hidden = false;
+        await loadSharedHistory();
+      } catch (error) { $("identity-status").textContent = error.message; }
+    }
+
+    $("identity-login").addEventListener("click", () => submitIdentity("login"));
+    $("identity-register").addEventListener("click", () => submitIdentity("register"));
+    $("identity-logout").addEventListener("click", async () => {
+      try {
+        await identityFetch("/api/identity/logout", { method: "POST", body: "{}" });
+        identityUser = null; sharedHistoryVersion = null;
+        $("identity-login").hidden = false; $("identity-register").hidden = false;
+        $("identity-email").hidden = false; $("identity-password").hidden = false;
+        $("identity-logout").hidden = true;
+        $("identity-status").textContent = "Sesión cerrada.";
+      } catch (error) { $("identity-status").textContent = error.message; }
+    });
 
     function restoreHistory() {
       try {
@@ -687,6 +806,7 @@
       }
     } catch {}
     restoreHistory();
+    refreshIdentity();
     checkHealth();
   </script>
 </body>
