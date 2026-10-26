@@ -1,7 +1,7 @@
 # Elyntro isolated Playwright worker
 
 ## Design
-Separate Docker service based on the official Playwright Python image, pinned to Playwright 1.55.0. The image contains Chromium and its OS dependencies; the build also runs `python -m playwright install --with-deps chromium`. The worker runs as a non-root user.
+Separate Docker service based on the official Playwright Python image, pinned to Playwright 1.64.0. The image contains Chromium and its OS dependencies; the build also runs `python -m playwright install --with-deps chromium`. The worker runs as a non-root user.
 
 Deploy as a Render **Private Service** using `Dockerfile.browser-worker`, preferably in the same region as Elyntro. Do not expose it publicly and do not add Elyntro API, model-provider, Founder Mode, or GitHub credentials to its environment. Configure only:
 - `ELYNTRO_BROWSER_WORKER_TOKEN`: random shared secret (at least 32 random bytes), entered directly in Render
