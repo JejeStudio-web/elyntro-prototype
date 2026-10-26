@@ -35,6 +35,7 @@ def _snapshot(page):
     return page.evaluate("""() => ({title:(document.title||'').slice(0,300),url:location.href,text:(document.body?.innerText||'').slice(0,12000),links:Array.from(document.querySelectorAll('a[href]')).slice(0,80).map(a=>({text:(a.innerText||a.getAttribute('aria-label')||'').trim().slice(0,160),href:a.href})).filter(a=>/^https?:/.test(a.href))})""")
 
 def _run(payload, domains, with_actions=False):
+    if not isinstance(payload, dict): return {"ok":False,"error":"El cuerpo debe ser un objeto JSON."},400
     url = payload.get("url")
     if not _safe_url(url, domains): return {"ok":False,"error":"URL pública no permitida o dominio fuera de la allowlist."},400
     actions = payload.get("actions", [])
