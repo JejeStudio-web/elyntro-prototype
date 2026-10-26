@@ -19,6 +19,7 @@ from elyntro.planner import RuleBasedPlanner, ToolDefinition
 from elyntro.store import SQLiteStore
 from elyntro.task_executor import StepResult, TaskExecutor
 from search_providers import TavilySearchProvider, fetch_public_http, is_public_http_url
+from tool_runtime import ToolRuntime, safe_calculate
 
 logger = logging.getLogger(__name__)
 BASE = Path(__file__).resolve().parent
@@ -718,6 +719,43 @@ def _smart_route(goal, history):
     return ("answer" if fallback == "chat" else fallback), "Ruta de reserva por reglas: el clasificador del modelo no devolvió JSON válido.", goal, "fallback"
 
 
+def _agent_tool_search(args):
+    query = args.get("query")
+    if not isinstance(query, str) or not query.strip():
+        return {"ok": False, "error": "La consulta de búsqueda debe ser texto no vacío."}
+    query = query.strip()
+    if len(query) > 400:
+        return {"ok": False, "error": "La consulta supera el límite de 400 caracteres."}
+    results, error = _web_search(query, limit=5)
+    return {
+        "ok": bool(results),
+        "summary": f"Se recuperaron {len(results)} resultados de búsqueda." if results else "La búsqueda no devolvió resultados utilizables.",
+        "results": results,
+        "error": error,
+        "provider": _search_provider_name(),
+    }
+
+
+def _agent_tool_calculate(args):
+    expression = args.get("expression")
+    if not isinstance(expression, str):
+        return {"ok": False, "error": "La expresión debe ser una cadena de texto."}
+    return safe_calculate(expression)
+
+
+def _run_tool_agent(goal, history):
+    """Run a bounded model/tool loop with only allow-listed, non-shell tools."""
+    runtime = ToolRuntime(
+        model_call=lambda messages, **options: _groq_messages(messages, **options),
+        tools={
+            "calculate": _agent_tool_calculate,
+            "web_search": _agent_tool_search,
+        },
+        max_steps=5,
+    )
+    return runtime.run(goal, history=history)
+
+
 def _answer_with_context(goal, history, search_results=None):
     system = (
         "Eres Elyntro, un asistente general riguroso. Responde en el idioma del usuario y adapta el detalle a su petición. "
@@ -784,6 +822,48 @@ def execute_unified():
         route = "chat" if decision == "answer" else decision
 
     if route == "chat":
+        if os.environ.get("ELYNTRO_TOOL_RUNTIME_ENABLED", "true").strip().casefold() in {"1", "true", "yes", "on"}:
+            result = _run_tool_agent(goal, history)
+            if not result.get("ok"):
+                error = result.get("error") or {}
+                message = result.get("answer") or "El agente no pudo completar la respuesta."
+                code = error.get("code", "agent_runtime_failed") if isinstance(error, dict) else "agent_runtime_failed"
+                retryable = bool(error.get("retryable", False)) if isinstance(error, dict) else False
+                failure, status = _api_failure(
+                    message,
+                    code=code,
+                    stage="agent_runtime",
+                    retryable=retryable,
+                    status=503 if code == "provider_not_configured" else 502,
+                    route=route,
+                    extra={
+                        "provider": "groq",
+                        "requested_model": result.get("requested_model"),
+                        "returned_model": result.get("returned_model"),
+                        "events": result.get("events", []),
+                        "sources": result.get("sources", []),
+                        "verification": result.get("verification"),
+                    },
+                )
+                return failure, status
+            return jsonify({
+                "ok": True,
+                "kind": "answer",
+                "route": route,
+                "route_reason": route_reason,
+                "route_source": route_source,
+                "answer": result.get("answer", ""),
+                "provider": result.get("provider", "groq"),
+                "requested_model": result.get("requested_model"),
+                "returned_model": result.get("returned_model"),
+                "response_id": result.get("response_id"),
+                "agent_runtime": "tool_runtime_v1",
+                "status": result.get("status"),
+                "events": result.get("events", []),
+                "sources": result.get("sources", []),
+                "artifacts": result.get("artifacts", []),
+                "verification": result.get("verification"),
+            })
         result = _answer_with_context(goal, history)
         if not result.get("text"):
             message = result.get("error") or "El proveedor no devolvió respuesta."
