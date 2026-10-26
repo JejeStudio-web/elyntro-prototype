@@ -29,8 +29,8 @@ SOURCES = {
 def clean_text(value):
     if not isinstance(value, str):
         return ""
-    value = value.replace("\\x00", " ")
-    value = re.sub(r"\\s+", " ", value).strip()
+    value = value.replace("\x00", " ")
+    value = re.sub(r"\s+", " ", value).strip()
     return value
 
 
@@ -61,7 +61,7 @@ def normalize_sft(row):
     answer = clean_text(row.get("output") or row.get("response") or row.get("answer") or row.get("assistant"))
     context = clean_text(row.get("input") or row.get("context"))
     if instruction and answer:
-        user_content = instruction + (("\\n\\nContexto:\\n" + context) if context else "")
+        user_content = instruction + (("\n\nContexto:\n" + context) if context else "")
         return {"messages": [{"role": "user", "content": user_content}, {"role": "assistant", "content": answer}]}
     return None
 
@@ -94,14 +94,14 @@ def main():
             if source["kind"] == "text":
                 title = clean_text(row.get("title", ""))
                 text = clean_text(row.get("text", ""))
-                value = (title + "\\n\\n" + text).strip() if title else text
+                value = (title + "\n\n" + text).strip() if title else text
                 if len(value) < a.min_chars:
                     continue
                 fingerprint = hashlib.sha256(value.casefold().encode("utf-8")).hexdigest()
                 if fingerprint in seen:
                     continue
                 seen.add(fingerprint)
-                f.write(value + "\\n\\n")
+                f.write(value + "\n\n")
                 digest.update(value.encode("utf-8"))
             else:
                 normalized = normalize_sft(row)
@@ -112,7 +112,7 @@ def main():
                 if fingerprint in seen:
                     continue
                 seen.add(fingerprint)
-                f.write(value + "\\n")
+                f.write(value + "\n")
                 digest.update(value.encode("utf-8"))
             written += 1
             if written >= a.max_records:
@@ -127,7 +127,7 @@ def main():
         "created_at_utc": datetime.now(timezone.utc).isoformat(), "seed": a.seed,
         "limitations": ["Streaming sample is capped, not a full corpus", "Upstream license and provenance must be reviewed before redistribution or commercial use"],
     }
-    (a.out_dir / (a.source + ".manifest.json")).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+    (a.out_dir / (a.source + ".manifest.json")).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(output), **manifest}, ensure_ascii=False))
 
 
