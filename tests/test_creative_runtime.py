@@ -117,5 +117,7 @@ def test_studio_contains_scene_transform_and_export_controls():
     assert 'id="posX"' in html
     assert 'id="saveScene"' in html
     assert 'id="exportScene"' in html
+    assert 'id="importScene"' in html
+    assert 'id="workflowExample"' in html
     assert 'id="checkGeneration"' in html
     assert 'id="clickBrowserButton"' in html
