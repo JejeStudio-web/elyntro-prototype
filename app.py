@@ -108,7 +108,7 @@ def _stream_provider_completion(messages, model, max_tokens, temperature, json_m
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
-                        yield "data: [DONE]\\n\\n"
+                        yield "data: [DONE]\n\n"
                         return
                     try:
                         parsed = json.loads(data)
@@ -116,19 +116,19 @@ def _stream_provider_completion(messages, model, max_tokens, temperature, json_m
                         continue
                     if isinstance(parsed, dict):
                         parsed["model"] = model
-                        yield "data: " + json.dumps(parsed, ensure_ascii=False, separators=(",", ":")) + "\\n\\n"
-            yield "data: [DONE]\\n\\n"
+                        yield "data: " + json.dumps(parsed, ensure_ascii=False, separators=(",", ":")) + "\n\n"
+            yield "data: [DONE]\n\n"
         except urllib.error.HTTPError as exc:
             # Avoid forwarding upstream response bodies, which may expose provider diagnostics.
             error = {"error": {"message": "El proveedor rechazó la solicitud durante el streaming",
                                "type": "provider_error", "status": exc.code}}
-            yield "data: " + json.dumps(error, ensure_ascii=False) + "\\n\\n"
-            yield "data: [DONE]\\n\\n"
+            yield "data: " + json.dumps(error, ensure_ascii=False) + "\n\n"
+            yield "data: [DONE]\n\n"
         except (urllib.error.URLError, TimeoutError, OSError):
             error = {"error": {"message": "Se perdió la conexión con el proveedor durante el streaming",
                                "type": "provider_connection_error"}}
-            yield "data: " + json.dumps(error, ensure_ascii=False) + "\\n\\n"
-            yield "data: [DONE]\\n\\n"
+            yield "data: " + json.dumps(error, ensure_ascii=False) + "\n\n"
+            yield "data: [DONE]\n\n"
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
