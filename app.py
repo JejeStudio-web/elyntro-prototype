@@ -832,7 +832,7 @@ def execute_unified():
                 failure, status = _api_failure(
                     message,
                     code=code,
-                    stage="agent_runtime",
+                    stage="answer" if code == "provider_not_configured" else "agent_runtime",
                     retryable=retryable,
                     status=503 if code == "provider_not_configured" else 502,
                     route=route,
