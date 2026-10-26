@@ -30,3 +30,13 @@ def test_founder_proposal_requires_goal_and_never_executes_code():
 def test_founder_proposal_caps_goal_length():
     response = app.test_client().post("/api/studio/founder/proposals", json={"goal": "x" * 4001})
     assert response.status_code == 400
+
+
+def test_studio_page_is_served_with_visual_and_governance_controls():
+    response = app.test_client().get("/studio")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert 'id="viewport"' in page
+    assert "three.module.js" in page
+    assert 'id="workflow"' in page
+    assert 'id="founderGoal"' in page
