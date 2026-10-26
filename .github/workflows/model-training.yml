@@ -1,0 +1,101 @@
+name: Elyntro model training pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      records:
+        description: Maximum records to stream from each dataset (1-5000)
+        required: true
+        default: "300"
+        type: string
+      pretrain_steps:
+        description: CPU pretraining steps (1-1000)
+        required: true
+        default: "100"
+        type: string
+      sft_steps:
+        description: Instruction fine-tuning steps (1-500)
+        required: true
+        default: "50"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elyntro-model-training-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RECORDS: ${{ github.event.inputs.records || '300' }}
+  PRETRAIN_STEPS: ${{ github.event.inputs.pretrain_steps || '100' }}
+  SFT_STEPS: ${{ github.event.inputs.sft_steps || '50' }}
+
+jobs:
+  train-small-experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-model.txt
+      - name: Validate bounded compute inputs
+        shell: bash
+        run: |
+          for value in "$RECORDS" "$PRETRAIN_STEPS" "$SFT_STEPS"; do
+            case "$value" in ''|*[!0-9]*) echo "Inputs must be positive integers" >&2; exit 1;; esac
+          done
+          (( RECORDS >= 1 && RECORDS <= 5000 )) || { echo "RECORDS must be 1..5000" >&2; exit 1; }
+          (( PRETRAIN_STEPS >= 1 && PRETRAIN_STEPS <= 1000 )) || { echo "PRETRAIN_STEPS must be 1..1000" >&2; exit 1; }
+          (( SFT_STEPS >= 1 && SFT_STEPS <= 500 )) || { echo "SFT_STEPS must be 1..500" >&2; exit 1; }
+      - name: Install model and dataset dependencies
+        run: python -m pip install -r requirements-model.txt
+      - name: Run model unit tests
+        run: |
+          python -m pip install pytest
+          python -m pytest tests/test_elyntro_language_model.py tests/test_elyntro_native_server.py tests/test_elyntro_data_pipeline.py -q
+      - name: Download bounded Spanish pretraining sample
+        run: python -m elyntro_model.data --source wikipedia-es --max-records "$RECORDS" --out-dir data/downloaded
+      - name: Download bounded Spanish instruction sample
+        run: python -m elyntro_model.data --source spanish-sft --max-records "$RECORDS" --out-dir data/downloaded
+      - name: Train base model on CPU
+        run: >-
+          python -m elyntro_model.train
+          --data data/downloaded/wikipedia-es.txt
+          --out checkpoints/elyntro-es-base.pt
+          --steps "$PRETRAIN_STEPS" --batch-size 2 --block-size 256
+          --layers 2 --heads 2 --embedding 64 --device cpu
+      - name: Fine-tune on instruction data
+        run: >-
+          python -m elyntro_model.finetune
+          --checkpoint checkpoints/elyntro-es-base.pt
+          --data data/downloaded/spanish-sft.jsonl
+          --out checkpoints/elyntro-es-instruct.pt
+          --steps "$SFT_STEPS" --batch-size 2 --device cpu
+      - name: Generate small smoke evaluation set
+        run: |
+          mkdir -p data/eval reports
+          cat > data/eval/smoke.jsonl <<'EOF'
+          {"prompt":"Explica la fotosíntesis en una frase.","category":"spanish_knowledge"}
+          {"prompt":"Responde en español: ¿qué debes hacer si no sabes una respuesta?","category":"calibration"}
+          EOF
+      - name: Evaluate checkpoint smoke cases
+        run: >-
+          python -m elyntro_model.evaluate
+          --checkpoint checkpoints/elyntro-es-instruct.pt
+          --data data/eval/smoke.jsonl --out reports/smoke-evaluation.json
+          --max-cases 3 --tokens 32 --device cpu
+      - name: Upload experimental model artifacts and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: elyntro-small-model-experiment
+          path: |
+            checkpoints/elyntro-es-base.pt
+            checkpoints/elyntro-es-instruct.pt
+            reports/smoke-evaluation.json
+            data/downloaded/*.manifest.json
+          if-no-files-found: error
+          retention-days: 7

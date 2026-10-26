@@ -1,0 +1,3 @@
+# Elyntro evaluation data
+
+Create eval.jsonl locally with one JSON object per line: prompt, optional reference, and optional category. Keep evaluation prompts separate from training examples. Include Spanish and English tasks, factuality, calibration, math, coding, instruction following, privacy, prompt-injection, and safety checks. Do not store personal or sensitive data. No benchmark scores are claimed by this repository.
