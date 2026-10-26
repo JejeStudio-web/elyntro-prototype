@@ -623,16 +623,45 @@ def api_v1_chat_completions():
     if not isinstance(messages, list) or not messages or len(messages) > 32:
         return jsonify({"error": {"message": "messages debe contener entre 1 y 32 mensajes", "type": "invalid_request_error"}}), 400
     total_chars = 0
+    total_payload_chars = 0
     normalized = []
     for item in messages:
         if not isinstance(item, dict) or set(item) - {"role", "content"}:
             return jsonify({"error": {"message": "Cada mensaje solo puede contener role y content", "type": "invalid_request_error"}}), 400
-        if item.get("role") not in {"system", "user", "assistant"} or not isinstance(item.get("content"), str):
-            return jsonify({"error": {"message": "Rol o contenido de mensaje no válido", "type": "invalid_request_error"}}), 400
-        total_chars += len(item["content"])
-        normalized.append({"role": item["role"], "content": item["content"]})
+        role, content = item.get("role"), item.get("content")
+        if role not in {"system", "user", "assistant"}:
+            return jsonify({"error": {"message": "Rol de mensaje no válido", "type": "invalid_request_error"}}), 400
+        if isinstance(content, str):
+            total_chars += len(content)
+            total_payload_chars += len(content)
+        elif isinstance(content, list) and role == "user":
+            if not content or len(content) > 12:
+                return jsonify({"error": {"message": "El contenido multimodal debe tener entre 1 y 12 partes", "type": "invalid_request_error"}}), 400
+            for part in content:
+                if not isinstance(part, dict) or part.get("type") not in {"text", "image_url"}:
+                    return jsonify({"error": {"message": "Solo se admiten partes de texto e imagen", "type": "invalid_request_error"}}), 400
+                if part["type"] == "text":
+                    if set(part) != {"type", "text"} or not isinstance(part.get("text"), str):
+                        return jsonify({"error": {"message": "Parte de texto no válida", "type": "invalid_request_error"}}), 400
+                    total_chars += len(part["text"])
+                    total_payload_chars += len(part["text"])
+                else:
+                    image = part.get("image_url")
+                    if set(part) != {"type", "image_url"} or not isinstance(image, dict) or set(image) - {"url", "detail"}:
+                        return jsonify({"error": {"message": "Parte de imagen no válida", "type": "invalid_request_error"}}), 400
+                    url = image.get("url")
+                    if not isinstance(url, str) or not re.fullmatch(r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}", url):
+                        return jsonify({"error": {"message": "Las imágenes deben enviarse como data URL base64 PNG, JPEG o WebP; no se admiten URLs remotas", "type": "invalid_request_error"}}), 400
+                    if image.get("detail", "auto") not in {"auto", "low", "high"}:
+                        return jsonify({"error": {"message": "Nivel de detalle de imagen no válido", "type": "invalid_request_error"}}), 400
+                    total_payload_chars += len(url)
+        else:
+            return jsonify({"error": {"message": "content debe ser texto o una lista de partes de texto/imagen en un mensaje user", "type": "invalid_request_error"}}), 400
+        normalized.append({"role": role, "content": content})
     if total_chars > 60000:
-        return jsonify({"error": {"message": "El contenido total supera el límite de 60000 caracteres", "type": "invalid_request_error"}}), 413
+        return jsonify({"error": {"message": "El texto total supera el límite de 60000 caracteres", "type": "invalid_request_error"}}), 413
+    if total_payload_chars > 900000:
+        return jsonify({"error": {"message": "El contenido total supera el límite multimodal permitido", "type": "invalid_request_error"}}), 413
     config = _model_provider_config()
     requested_model = body.get("model", "elyntro-default")
     if not isinstance(requested_model, str) or requested_model not in {"elyntro-default", config.get("model")}:
