@@ -24,7 +24,7 @@ MAX_REQUEST_BYTES = 1_000_000
 
 
 def _config():
-    provider = os.getenv("ELYNTRO_MODEL_PROVIDER", "openai-compatible").strip().casefold()
+    provider = os.getenv("ELYNTRO_MODEL_PROVIDER", "groq").strip().casefold()
     defaults = {
         "groq": ("GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-20b", "https://api.groq.com/openai/v1"),
         "openai": ("OPENAI_API_KEY", "OPENAI_MODEL", "gpt-4.1-mini", "https://api.openai.com/v1"),
