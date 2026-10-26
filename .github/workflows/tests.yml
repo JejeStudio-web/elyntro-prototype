@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [main, "feature/**", "phase-1/**"]
+    branches: [main, "feature/**", "feat/**", "phase-1/**"]
   pull_request:
   workflow_dispatch:
 
