@@ -53,7 +53,7 @@ def test_v1_chat_completion_uses_configured_compatible_provider(api_client, monk
 
     def fake_urlopen(request, timeout):
         seen["url"] = request.full_url
-        seen["auth"] = request.get_header("Authorization")
+        seen["auth"] = request.get_header("Authorization") or request.unredirected_hdrs.get("Authorization")
         seen["payload"] = json.loads(request.data)
         seen["timeout"] = timeout
         return FakeResponse()
