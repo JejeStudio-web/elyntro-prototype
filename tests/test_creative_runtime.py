@@ -306,3 +306,41 @@ def test_creator_prefix_rejects_non_diff_model_output(monkeypatch, tmp_path):
     )
     assert response.status_code == 422
     assert list(tmp_path.glob("prop_*.json")) == []
+
+
+
+def test_comfyui_replaces_positive_prompt_without_overwriting_negative(monkeypatch):
+    import json
+    import creative_runtime
+    import app as mod
+
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-api-key")
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://comfyui.test:8188")
+    workflow = {
+        "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "old positive", "clip": ["0", 1]}},
+        "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality, blurry", "clip": ["0", 1]}},
+        "3": {"class_type": "KSampler", "inputs": {"positive": ["1", 0], "negative": ["2", 0]}},
+    }
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, limit=-1):
+            return json.dumps({"prompt_id": "job-123", "number": 1}).encode("utf-8")
+
+    def fake_urlopen(request, timeout=0):
+        sent = json.loads(request.data.decode("utf-8"))["prompt"]
+        assert sent["1"]["inputs"]["text"] == "a glass observatory at dusk"
+        assert sent["2"]["inputs"]["text"] == "low quality, blurry"
+        return FakeResponse()
+
+    monkeypatch.setattr(creative_runtime.urllib.request, "urlopen", fake_urlopen)
+    response = mod.app.test_client().post(
+        "/api/creative/comfyui/generate",
+        headers={"Authorization": "Bearer test-api-key"},
+        json={"prompt": "a glass observatory at dusk", "workflow": workflow},
+    )
+    assert response.status_code == 202
+    assert response.get_json()["prompt_id"] == "job-123"
