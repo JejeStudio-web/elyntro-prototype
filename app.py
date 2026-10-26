@@ -30,6 +30,7 @@ from elyntro.task_executor import StepResult, TaskExecutor
 from search_providers import TavilySearchProvider, fetch_public_http, is_public_http_url
 import external_resources
 from tool_runtime import ToolRuntime, safe_calculate
+from creative_runtime import creative_api
 
 logger = logging.getLogger(__name__)
 BASE = Path(__file__).resolve().parent
@@ -48,6 +49,7 @@ def resolve_db_path() -> Path:
 DB_PATH = str(resolve_db_path())
 app = Flask(__name__, static_folder="static")
 app.register_blueprint(api_v1)
+app.register_blueprint(creative_api)
 # Render sits behind one trusted reverse proxy; normalize client IP and HTTPS metadata.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
@@ -1101,3 +1103,9 @@ def get_artifact(task_id, name):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=False)
+
+
+@app.get("/creative-studio")
+def creative_studio():
+    """Serve the browser-side Three.js scene editor."""
+    return send_from_directory(app.static_folder, "creative-studio.html")
