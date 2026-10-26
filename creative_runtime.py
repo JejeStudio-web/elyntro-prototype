@@ -60,7 +60,7 @@ def creative_status():
             "threejs_scene": {"available": True, "mode": "browser-local", "route": "/creative-studio"},
             "comfyui": {"available": bool(_comfy_base()), "configured": bool(_comfy_base()),
                         "reason": None if _comfy_base() else "Configura COMFYUI_BASE_URL en el entorno donde se ejecuta ComfyUI o Elyntro."},
-            "playwright": {"available": _playwright_available(), "enabled": os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() == "true"},
+            "playwright": {"available": bool(os.getenv("ELYNTRO_BROWSER_WORKER_URL", "").strip() and os.getenv("ELYNTRO_BROWSER_WORKER_TOKEN", "").strip()), "enabled": os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() == "true", "mode": "private_worker"},
             "founder_mode": {"available": bool(os.getenv("ELYNTRO_FOUNDER_TOKEN", "").strip()), "proposal_only": True},
             "self_modification": {
                 "mode": "reviewable_proposals_and_optional_draft_pr",
@@ -80,6 +80,47 @@ def _playwright_available() -> bool:
         return True
     except Exception:
         return False
+
+
+def _proxy_browser_worker(endpoint: str):
+    """Fail closed unless browser actions are sent to the separately deployed private worker."""
+    base = os.getenv("ELYNTRO_BROWSER_WORKER_URL", "").strip().rstrip("/")
+    token = os.getenv("ELYNTRO_BROWSER_WORKER_TOKEN", "").strip()
+    if not base or not token:
+        return _json_error("El worker privado de Playwright no está configurado; el navegador permanece desactivado.", 503)
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.scheme != "http" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+        return _json_error("ELYNTRO_BROWSER_WORKER_URL debe ser un origen HTTP privado válido de Render.", 503)
+    payload = request.get_json(silent=True) or {}
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    if len(data) > MAX_BODY:
+        return _json_error("La petición al navegador supera el límite de tamaño.", 413)
+    req = urllib.request.Request(
+        base + endpoint, data=data,
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=35) as response:
+            raw = response.read(2_500_001)
+            status = response.status
+        if len(raw) > 2_500_000:
+            return _json_error("La respuesta del worker supera el límite de tamaño.", 502)
+        result = json.loads(raw.decode("utf-8"))
+        if not isinstance(result, dict):
+            return _json_error("El worker devolvió una respuesta no válida.", 502)
+        return jsonify(result), status
+    except urllib.error.HTTPError as exc:
+        try:
+            raw = exc.read(256_001)
+            result = json.loads(raw.decode("utf-8"))
+            if isinstance(result, dict):
+                return jsonify(result), exc.code
+        except (OSError, ValueError, UnicodeDecodeError):
+            pass
+        return _json_error("El worker privado rechazó la petición.", exc.code)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, UnicodeDecodeError) as exc:
+        return jsonify({"ok": False, "error": "No se pudo contactar con el worker privado.", "detail": type(exc).__name__}), 502
 
 
 @creative_api.post("/comfyui/generate")
@@ -210,6 +251,7 @@ def browser_inspect():
         return _json_error("Se requiere una clave API de Elyntro configurada.", 401)
     if os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() != "true":
         return _json_error("El control Playwright está desactivado por defecto. Actívalo solo en un entorno aislado.", 503)
+    return _proxy_browser_worker("/v1/inspect")
     try:
         from search_providers import is_public_http_url
         from playwright.sync_api import sync_playwright
@@ -268,6 +310,7 @@ def browser_act():
         return _json_error("Se requiere una clave API de Elyntro configurada.", 401)
     if os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() != "true":
         return _json_error("El control Playwright está desactivado por defecto.", 503)
+    return _proxy_browser_worker("/v1/act")
     try:
         from playwright.sync_api import sync_playwright
         from search_providers import is_public_http_url
