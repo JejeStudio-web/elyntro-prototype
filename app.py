@@ -377,13 +377,15 @@ def health():
     search_configured = search_provider == "duckduckgo" or (
         search_provider == "tavily" and bool(os.environ.get("TAVILY_API_KEY", "").strip())
     )
+    model_config = _model_provider_config()
     return jsonify({
         "ok": True,
-        "prototype": "1.1.0",
+        "prototype": "1.2.0",
         "engine": "6.2.0",
         "database_path": str(resolve_db_path()),
-        "model_provider": "groq_configured" if os.environ.get("GROQ_API_KEY", "").strip() else "not_configured",
-        "model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b") if os.environ.get("GROQ_API_KEY", "").strip() else None,
+        "model_provider": model_config["provider"] if model_config["configured"] else "not_configured",
+        "model": model_config.get("model") if model_config["configured"] else None,
+        "model_configured": model_config["configured"],
         "external_research": f"{search_provider}_best_effort",
         "search_provider": search_provider,
         "search_provider_configured": search_configured,
