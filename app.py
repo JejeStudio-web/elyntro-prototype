@@ -105,6 +105,7 @@ def _apply_api_limits():
         "/api/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/v1/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
+        "/api/v1/chat/completions": int(os.environ.get("ELYNTRO_RATE_LIMIT_CHAT_PER_MINUTE", "20")),
         "/api/tasks": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
     }
     if request.method != "POST" or request.path not in limits:
@@ -247,8 +248,7 @@ def _groq_chat(goal: str, direct: bool = False) -> dict:
         except Exception:
             raw = ""
         detail = None
-        code = None
-        kind = None
+        code = None        kind = None
         if raw:            try:
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict):
@@ -497,8 +497,7 @@ def classify_request(goal: str) -> str:
     if any(w in text for w in research_words):
         return "research"
     if any(w in text for w in artifact_verbs):
-        return "create"
-    if any(w in text for w in analyze_words):        return "analyze"
+        return "create"    if any(w in text for w in analyze_words):        return "analyze"
     return "chat"
 
 def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=False):
@@ -747,8 +746,7 @@ def _review_research_answer(goal, answer, pages):
     if not result.get("text"):
         return {"status": "review_unavailable", "flags": [], "note": "No se pudo completar la revisión de respaldo."}
     try:
-        report = json.loads(result["text"])        status = report.get("supported") if report.get("supported") in {"mostly", "mixed", "weak"} else "mixed"
-        return {"status": status, "unsupported_claims": report.get("unsupported_claims", [])[:6],
+        report = json.loads(result["text"])        status = report.get("supported") if report.get("supported") in {"mostly", "mixed", "weak"} else "mixed"        return {"status": status, "unsupported_claims": report.get("unsupported_claims", [])[:6],
                 "missing_caveats": report.get("missing_caveats", [])[:6], "source_conflicts": report.get("source_conflicts", [])[:4],
                 "note": "Revisión automática de coherencia con las fuentes; no constituye verificación independiente de la verdad."}
     except (ValueError, TypeError):
@@ -997,8 +995,7 @@ def execute_unified():
             "route": route,
             "route_reason": route_reason,
             "route_source": route_source,            "answer": result["text"],
-            "provider": "groq",
-            "requested_model": result.get("requested_model"),
+            "provider": "groq",            "requested_model": result.get("requested_model"),
             "returned_model": result.get("model"),
             "response_id": result.get("response_id"),
             "verification": {
