@@ -265,8 +265,26 @@ def handle_analyze(inputs, context):
     return StepResult(output={"analysis": summary, "external_model_used": bool(result["text"])}, artifacts=[artifact])
 
 def handle_create(inputs, context):
-    artifact = _goal_artifact(str(inputs.get("goal", "")))
-    return StepResult(output={"created": artifact["name"], "mode": "deterministic-template"}, artifacts=[artifact])
+    """Generate a real artifact with the configured model; never disguise provider failure as success."""
+    goal = str(inputs.get("goal", "")).strip()
+    if os.environ.get("GROQ_API_KEY", "").strip():
+        artifact, provider_result = _create_with_model(goal)
+        if not artifact:
+            raise RuntimeError(provider_result.get("error") or "El modelo no pudo generar un artefacto válido.")
+        checks = _validate_artifact(artifact)
+        artifact["validation"] = checks
+        return StepResult(
+            output={"created": artifact["name"], "mode": "model-generated",
+                    "static_validation": checks.get("status", "not_checked")},
+            artifacts=[artifact],
+            evidence=[{"type": "static_artifact_validation", "result": checks}],
+        )
+    artifact = _goal_artifact(goal)
+    return StepResult(
+        output={"created": artifact["name"], "mode": "deterministic-template",
+                "limitation": "GROQ_API_KEY no está configurada; el contenido no se ha generado con un modelo."},
+        artifacts=[artifact],
+    )
 
 def handle_verify(inputs, context):
     return StepResult(output={"verification_requested": True}, evidence=[{"criterion": CRITERION, "detail": "El artefacto debe existir y tener contenido no vacío; el validador independiente lo inspeccionará."}])
@@ -358,6 +376,7 @@ def home():
     return send_from_directory(app.static_folder, "index.html")
 
 @app.get("/api/health")
+@app.get("/api/v1/health")
 def health():
     search_provider = _search_provider_name()
     search_configured = search_provider == "duckduckgo" or (
@@ -742,6 +761,7 @@ def _create_with_model(goal):
 
 @app.post("/api/agent/execute")
 @app.post("/api/execute")
+@app.post("/api/v1/agent/execute")
 def execute_unified():
     """Model-driven unified entry point with conversation context and optional live web retrieval."""
     payload = request.get_json(silent=True) or {}
