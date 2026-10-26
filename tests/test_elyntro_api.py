@@ -45,20 +45,31 @@ def test_chat_completions_returns_openai_compatible_response(monkeypatch):
     assert body["elyntro"]["provider"] == "groq"
 
 
-def test_chat_completions_rejects_streaming_and_unknown_models(monkeypatch):
+def test_chat_completions_supports_streaming_and_rejects_unknown_models(monkeypatch):
     import app as mod
+    from flask import Response
 
     monkeypatch.setenv("ELYNTRO_MODEL_PROVIDER", "ollama")
     monkeypatch.setenv("ELYNTRO_MODEL_BASE_URL", "http://127.0.0.1:11434/v1")
     monkeypatch.setenv("ELYNTRO_MODEL", "local-test")
+    observed = {}
+    def fake_stream(messages, model, max_tokens, temperature, json_mode=False):
+        observed.update(model=model, max_tokens=max_tokens, temperature=temperature, json_mode=json_mode,
+                        messages=messages)
+        return Response('data: {"choices":[{"delta":{"content":"ok"}}]}\\n\\ndata: [DONE]\\n\\n',
+                        mimetype="text/event-stream")
+    monkeypatch.setattr(mod, "_stream_provider_completion", fake_stream)
     client = mod.app.test_client()
     messages = [{"role": "user", "content": "test"}]
 
     streaming = client.post("/api/v1/chat/completions", json={"messages": messages, "stream": True})
     unknown = client.post("/api/v1/chat/completions", json={"messages": messages, "model": "other-model"})
 
-    assert streaming.status_code == 400
-    assert streaming.get_json()["error"]["type"] == "unsupported_parameter"
+    assert streaming.status_code == 200
+    assert streaming.mimetype == "text/event-stream"
+    assert "data: [DONE]" in streaming.get_data(as_text=True)
+    assert observed["model"] == "local-test"
+    assert observed["messages"] == messages
     assert unknown.status_code == 404
     assert unknown.get_json()["error"]["type"] == "model_not_found"
 
