@@ -81,6 +81,7 @@
     .nav-icon { width: 18px; color: var(--accent); text-align: center; }
     .side-note { margin-top: auto; padding: 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); font-size: 12px; }
     .conversation-list { display: grid; gap: 4px; max-height: 34vh; overflow: auto; }
+    .mobile-conversation-controls { display: none; }
     .conversation-item { display: flex; gap: 5px; min-width: 0; }
     .conversation-item button { min-width: 0; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #c2cbdd; text-align: left; padding: 8px 9px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .conversation-item button:first-child { flex: 1; }
@@ -183,6 +184,9 @@
       .shell { display: block; }
       .sidebar { display: none; }
       .mobile-brand { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 750; }
+      .mobile-conversation-controls { display: flex; align-items: center; gap: 5px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+      .mobile-conversation-controls select { min-width: 0; flex: 1; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px; font: inherit; font-size: 12px; }
+      .mobile-conversation-controls button { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; }
       .mobile-brand .mark { width: 30px; height: 30px; border-radius: 10px; }
       .topbar { min-height: 62px; padding: 10px 14px; }
       .section-title { display: none; }
@@ -238,6 +242,10 @@
           <button class="utility-button" id="clear-history" type="button" title="Borra los mensajes guardados en este navegador">Borrar historial</button>
         </div>
       </header>
+      <div class="mobile-conversation-controls" aria-label="Gestión de conversaciones">
+        <select id="mobile-conversation-select" aria-label="Conversación activa"></select>
+        <button type="button" id="mobile-new-conversation">Nueva</button>
+      </div>
 
       <main class="workspace">
         <section class="intro" id="welcome">
@@ -485,7 +493,7 @@
       attachedText = null;
       $("attachment").replaceChildren();
       $("file-input").value = "";
-      while (history.length > 12) history.shift();
+      while (history.length > 40) history.shift();
       saveHistory();
       const pending = addMessage("assistant", "En curso", "Esperando respuesta de la API…");
       const controller = new AbortController();
@@ -534,7 +542,7 @@
             : `La tarea terminó con estado: ${state}.`;
           history.push({ role: "assistant", content: `Estado de tarea: ${state}` });
         }
-        while (history.length > 12) history.shift();
+        while (history.length > 40) history.shift();
         saveHistory();
       } catch (error) {
         pending.article.classList.add("error");
@@ -562,6 +570,8 @@
       }
     });
     $("new-task").addEventListener("click", createConversation);
+    $("mobile-new-conversation").addEventListener("click", createConversation);
+    $("mobile-conversation-select").addEventListener("change", (event) => switchConversation(event.target.value));
 
     function titleFor(messages) {
       const first = messages.find(item => item.role === "user");
@@ -591,6 +601,16 @@
     function renderConversationList() {
       const list = $("conversation-list");
       list.replaceChildren();
+      const mobileSelect = $("mobile-conversation-select");
+      if (mobileSelect) {
+        mobileSelect.replaceChildren();
+        [...conversations].sort((a, b) => b.updatedAt - a.updatedAt).forEach(item => {
+          const option = document.createElement("option");
+          option.value = item.id; option.textContent = item.title || "Nueva conversación";
+          option.selected = item.id === activeConversationId;
+          mobileSelect.append(option);
+        });
+      }
       [...conversations].sort((a, b) => b.updatedAt - a.updatedAt).forEach(item => {
         const row = element("div", "conversation-item");
         const open = element("button", item.id === activeConversationId ? "active" : "", item.title || "Nueva conversación");
