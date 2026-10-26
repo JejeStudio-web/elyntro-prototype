@@ -79,13 +79,20 @@
     }
     .nav button:hover, .nav button.active { border-color: #ffffff10; background: #ffffff0b; color: var(--text); }
     .nav-icon { width: 18px; color: var(--accent); text-align: center; }
-    .identity-box { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: #ffffff05; }
-    .identity-box strong { font-size: 12px; }
-    .identity-box input { width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
-    .identity-actions { display: flex; flex-wrap: wrap; gap: 5px; }
-    .identity-actions button { border: 1px solid var(--line); border-radius: 8px; background: var(--panel-raised); color: var(--text); padding: 7px 9px; font-size: 11px; }
-    #identity-status { margin: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+    .identity-box { display:grid; gap:7px; padding:12px; border:1px solid var(--line); border-radius:13px; background:#ffffff05; }
+    .identity-box strong { font-size:12px; }
+    .identity-box input { width:100%; min-width:0; padding:9px; border:1px solid var(--line); border-radius:9px; background:var(--panel); color:var(--text); font:inherit; font-size:12px; }
+    .identity-actions { display:flex; flex-wrap:wrap; gap:5px; }
+    .identity-actions button { border:1px solid var(--line); border-radius:8px; background:var(--panel-raised); color:var(--text); padding:7px 9px; font-size:11px; }
+    #identity-status { margin:0; color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
     .side-note { margin-top: auto; padding: 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); font-size: 12px; }
+    .conversation-list { display: grid; gap: 4px; max-height: 34vh; overflow: auto; }
+    .mobile-conversation-controls { display: none; }
+    .conversation-item { display: flex; gap: 5px; min-width: 0; }
+    .conversation-item button { min-width: 0; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #c2cbdd; text-align: left; padding: 8px 9px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-item button:first-child { flex: 1; }
+    .conversation-item button.active, .conversation-item button:hover { border-color: #ffffff10; background: #ffffff0b; color: var(--text); }
+    .conversation-item .delete-conversation { flex: 0 0 auto; padding: 6px 8px; color: var(--muted); }
     .side-note strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 12px; }
     .main { min-width: 0; display: flex; flex-direction: column; }
     .topbar {
@@ -183,6 +190,9 @@
       .shell { display: block; }
       .sidebar { display: none; }
       .mobile-brand { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 750; }
+      .mobile-conversation-controls { display: flex; align-items: center; gap: 5px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+      .mobile-conversation-controls select { min-width: 0; flex: 1; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px; font: inherit; font-size: 12px; }
+      .mobile-conversation-controls button { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; }
       .mobile-brand .mark { width: 30px; height: 30px; border-radius: 10px; }
       .topbar { min-height: 62px; padding: 10px 14px; }
       .section-title { display: none; }
@@ -224,12 +234,11 @@
       </section>
       <button class="new-task" id="new-task" type="button">＋ &nbsp; Nueva tarea</button>
       <div>
-        <p class="side-label">Espacio de trabajo</p>
+        <p class="side-label">Conversaciones</p><div class="conversation-list" id="conversation-list" aria-label="Conversaciones guardadas"></div><p class="side-label">Espacio de trabajo</p>
         <nav class="nav">
           <button class="active" type="button" aria-current="page"><span class="nav-icon">◈</span> Asistente</button>
           <button type="button" data-prompt="Investiga fuentes sobre "><span class="nav-icon">⌕</span> Investigación</button>
           <button type="button" data-prompt="Analiza esta idea: "><span class="nav-icon">⌁</span> Análisis</button>
-          <button type="button" id="open-creative-studio"><span class="nav-icon">◇</span> Estudio 3D</button>
           <button type="button" data-prompt="Crea un documento sobre "><span class="nav-icon">▧</span> Creación</button>
         </nav>
       </div>
@@ -250,6 +259,10 @@
           <button class="utility-button" id="clear-history" type="button" title="Borra los mensajes guardados en este navegador">Borrar historial</button>
         </div>
       </header>
+      <div class="mobile-conversation-controls" aria-label="Gestión de conversaciones">
+        <select id="mobile-conversation-select" aria-label="Conversación activa"></select>
+        <button type="button" id="mobile-new-conversation">Nueva</button>
+      </div>
 
       <main class="workspace">
         <section class="intro" id="welcome">
@@ -294,10 +307,13 @@
     const $ = (id) => document.getElementById(id);
     const conversation = $("conversation");
     const history = [];
-    const HISTORY_KEY = "elyntro.conversation.v1";
+    const HISTORY_KEY = "elyntro.conversations.v2";
+    const LEGACY_HISTORY_KEY = "elyntro.conversation.v1";
     let identityUser = null;
-    let sharedHistoryVersion = null;
-    let syncInFlight = false;
+    const sharedVersions = new Map();
+    let syncRunning = false;
+    const conversations = [];
+    let activeConversationId = null;
     const THEME_KEY = "elyntro.theme.v1";
     let busy = false;
     let attachedText = null;
@@ -497,21 +513,16 @@
       attachedText = null;
       $("attachment").replaceChildren();
       $("file-input").value = "";
-      while (history.length > 12) history.shift();
+      while (history.length > 40) history.shift();
       saveHistory();
       const pending = addMessage("assistant", "En curso", "Esperando respuesta de la API…");
       const controller = new AbortController();
       activeController = controller;
       const timeout = window.setTimeout(() => controller.abort(), 120000);
       try {
-        const headers = { "Content-Type": "application/json" };
-        if (prompt.startsWith("[245jg&]")) {
-          const founderToken = sessionStorage.getItem("elyntro_founder_token") || "";
-          if (founderToken) headers.Authorization = "Bearer " + founderToken;
-        }
         const response = await fetch("/api/agent/execute", {
           method: "POST",
-          headers,
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ goal: fullPrompt, history: requestHistory }),
           signal: controller.signal,
         });
@@ -551,7 +562,7 @@
             : `La tarea terminó con estado: ${state}.`;
           history.push({ role: "assistant", content: `Estado de tarea: ${state}` });
         }
-        while (history.length > 12) history.shift();
+        while (history.length > 40) history.shift();
         saveHistory();
       } catch (error) {
         pending.article.classList.add("error");
@@ -578,135 +589,149 @@
         $("composer-form").requestSubmit();
       }
     });
-    $("new-task").addEventListener("click", () => {
-      if (busy && activeController) activeController.abort();
+    $("new-task").addEventListener("click", createConversation);
+    $("mobile-new-conversation").addEventListener("click", createConversation);
+    $("mobile-conversation-select").addEventListener("change", (event) => switchConversation(event.target.value));
+
+    function titleFor(messages) {
+      const first = messages.find(item => item.role === "user");
+      const title = String(first?.content || "Nueva conversación").replace(/\s+/g, " ").trim();
+      return title.length > 42 ? title.slice(0, 39) + "…" : title;
+    }
+
+    function persistConversations() {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify({
+          activeId: activeConversationId,
+          items: conversations.map(item => ({ ...item, messages: item.messages.slice(-40) }))
+        }));
+      } catch { $("status").textContent = "No se pudieron guardar las conversaciones en este navegador."; }
+    }
+
+    function saveHistory() {
+      const current = conversations.find(item => item.id === activeConversationId);
+      if (!current) return;
+      current.messages = history.slice(-40);
+      current.title = titleFor(current.messages);
+      current.updatedAt = Date.now();
+      persistConversations();
+      renderConversationList();
+      if (identityUser) syncOneConversation(current);
+    }
+
+    function renderConversationList() {
+      const list = $("conversation-list");
+      list.replaceChildren();
+      const mobileSelect = $("mobile-conversation-select");
+      if (mobileSelect) {
+        mobileSelect.replaceChildren();
+        [...conversations].sort((a, b) => b.updatedAt - a.updatedAt).forEach(item => {
+          const option = document.createElement("option");
+          option.value = item.id; option.textContent = item.title || "Nueva conversación";
+          option.selected = item.id === activeConversationId;
+          mobileSelect.append(option);
+        });
+      }
+      [...conversations].sort((a, b) => b.updatedAt - a.updatedAt).forEach(item => {
+        const row = element("div", "conversation-item");
+        const open = element("button", item.id === activeConversationId ? "active" : "", item.title || "Nueva conversación");
+        open.type = "button";
+        open.title = item.title || "Nueva conversación";
+        open.addEventListener("click", () => switchConversation(item.id));
+        const remove = element("button", "delete-conversation", "×");
+        remove.type = "button";
+        remove.title = "Eliminar conversación";
+        remove.addEventListener("click", () => deleteConversation(item.id));
+        row.append(open, remove);
+        list.append(row);
+      });
+    }
+
+    function clearVisibleConversation() {
       conversation.replaceChildren();
       history.splice(0, history.length);
-      saveHistory();
+      $("welcome").hidden = false;
+      $("suggestions").hidden = false;
+    }
+
+    function switchConversation(id) {
+      if (busy) { $("status").textContent = "Espera a que termine la petición antes de cambiar de conversación."; return; }
+      const target = conversations.find(item => item.id === id);
+      if (!target) return;
+      activeConversationId = id;
+      clearVisibleConversation();
+      target.messages.slice(-40).forEach(item => {
+        history.push({ role: item.role, content: item.content });
+        addMessage(item.role, "Historial local", item.content);
+      });
+      persistConversations();
+      renderConversationList();
+      $("status").textContent = "Conversación abierta. El historial se guarda en este navegador.";
+    }
+
+    function createConversation() {
+      if (busy) { $("status").textContent = "Espera a que termine la petición antes de crear otra conversación."; return; }
+      const item = { id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())), title: "Nueva conversación", updatedAt: Date.now(), messages: [] };
+      conversations.push(item);
+      activeConversationId = item.id;
+      clearVisibleConversation();
       attachedText = null;
       $("attachment").replaceChildren();
       $("file-input").value = "";
-      $("welcome").hidden = false;
-      $("suggestions").hidden = false;
+      persistConversations();
+      renderConversationList();
       $("status").textContent = "Nueva conversación iniciada.";
       $("prompt").focus();
-    });
-
-    function saveHistory() {
-      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-12))); }
-      catch { $("status").textContent = "El historial no se pudo guardar en este navegador."; }
-      if (identityUser) syncHistoryToServer();
     }
 
-    function csrfToken() {
-      const match = document.cookie.match(/(?:^|; )elyntro_csrf=([^;]+)/);
-      return match ? decodeURIComponent(match[1]) : "";
+    function deleteConversation(id) {
+      if (busy && id === activeConversationId) { $("status").textContent = "No se puede eliminar la conversación mientras hay una petición en curso."; return; }
+      const index = conversations.findIndex(item => item.id === id);
+      if (index < 0) return;
+      const wasActive = id === activeConversationId;
+      conversations.splice(index, 1);
+      if (identityUser) deleteSharedConversation(id);
+      if (wasActive) {
+        activeConversationId = null;
+        if (conversations.length) switchConversation(conversations[0].id);
+        else createConversation();
+      } else { persistConversations(); renderConversationList(); }
+      $("status").textContent = "Conversación eliminada de este navegador.";
     }
-
-    async function identityFetch(path, options = {}) {
-      const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-      if (options.method && options.method !== "GET") headers["X-Elyntro-CSRF"] = csrfToken();
-      const response = await fetch(path, { credentials: "same-origin", ...options, headers });
-      const data = await responseJson(response);
-      if (!response.ok) throw new Error(data.error || "Error de identidad (HTTP " + response.status + ").");
-      return data;
-    }
-
-    async function syncHistoryToServer() {
-      if (!identityUser || syncInFlight) return;
-      syncInFlight = true;
-      try {
-        const data = { messages: history.slice(-12) };
-        const response = await identityFetch("/api/identity/sync/conversations/main", {
-          method: "PUT", body: JSON.stringify({ data, expected_version: sharedHistoryVersion })
-        });
-        sharedHistoryVersion = response.version;
-        $("identity-status").textContent = "Sesión activa · historial sincronizado";
-      } catch (error) {
-        $("identity-status").textContent = "Sesión activa · sincronización pendiente: " + error.message;
-      } finally { syncInFlight = false; }
-    }
-
-    async function loadSharedHistory() {
-      try {
-        const data = await identityFetch("/api/identity/sync/conversations/main", { method: "GET" });
-        sharedHistoryVersion = data.version;
-        if (Array.isArray(data.data?.messages)) {
-          history.splice(0, history.length, ...data.data.messages.filter(item =>
-            item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-12));
-          conversation.replaceChildren();
-          for (const item of history) addMessage(item.role, "Historial sincronizado", item.content);
-          try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch {}
-        }
-        $("identity-status").textContent = "Sesión activa · historial sincronizado";
-      } catch (error) {
-        if (error.message.includes("No encontrado")) await syncHistoryToServer();
-        else $("identity-status").textContent = "Sesión activa · " + error.message;
-      }
-    }
-
-    async function refreshIdentity() {
-      try {
-        const data = await identityFetch("/api/identity/me", { method: "GET" });
-        identityUser = data.user;
-        $("identity-status").textContent = "Sesión: " + identityUser.email;
-        $("identity-login").hidden = true;
-        $("identity-register").hidden = true;
-        $("identity-email").hidden = true;
-        $("identity-password").hidden = true;
-        $("identity-logout").hidden = false;
-        await loadSharedHistory();
-      } catch (error) {
-        identityUser = null;
-        $("identity-status").textContent = error.message.includes("503")
-          ? "Sincronización aún no configurada en el servidor."
-          : "Inicia sesión para sincronizar entre dispositivos.";
-      }
-    }
-
-    async function submitIdentity(mode) {
-      const email = $("identity-email").value.trim();
-      const password = $("identity-password").value;
-      try {
-        const data = await identityFetch("/api/identity/" + mode, {
-          method: "POST", body: JSON.stringify({ email, password })
-        });
-        identityUser = data.user;
-        $("identity-password").value = "";
-        $("identity-status").textContent = "Sesión iniciada: " + identityUser.email;
-        $("identity-login").hidden = true;
-        $("identity-register").hidden = true;
-        $("identity-email").hidden = true;
-        $("identity-password").hidden = true;
-        $("identity-logout").hidden = false;
-        await loadSharedHistory();
-      } catch (error) { $("identity-status").textContent = error.message; }
-    }
-
-    $("identity-login").addEventListener("click", () => submitIdentity("login"));
-    $("identity-register").addEventListener("click", () => submitIdentity("register"));
-    $("identity-logout").addEventListener("click", async () => {
-      try {
-        await identityFetch("/api/identity/logout", { method: "POST", body: "{}" });
-        identityUser = null; sharedHistoryVersion = null;
-        $("identity-login").hidden = false; $("identity-register").hidden = false;
-        $("identity-email").hidden = false; $("identity-password").hidden = false;
-        $("identity-logout").hidden = true;
-        $("identity-status").textContent = "Sesión cerrada.";
-      } catch (error) { $("identity-status").textContent = error.message; }
-    });
 
     function restoreHistory() {
       try {
-        const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-        if (!Array.isArray(saved)) return;
-        for (const item of saved.slice(-12)) {
-          if (!item || !["user", "assistant"].includes(item.role) || typeof item.content !== "string") continue;
-          history.push({ role: item.role, content: item.content });
-          addMessage(item.role, "Historial local", item.content);
+        const raw = localStorage.getItem(HISTORY_KEY);
+        const saved = raw ? JSON.parse(raw) : null;
+        if (saved && Array.isArray(saved.items)) {
+          saved.items.slice(0, 100).forEach(item => {
+            if (!item || typeof item.id !== "string" || !Array.isArray(item.messages)) return;
+            const messages = item.messages.filter(message => message && ["user", "assistant"].includes(message.role) && typeof message.content === "string").slice(-40);
+            conversations.push({ id: item.id, title: typeof item.title === "string" ? item.title.slice(0, 120) : titleFor(messages), updatedAt: Number(item.updatedAt) || Date.now(), messages });
+          });
+          activeConversationId = conversations.some(item => item.id === saved.activeId) ? saved.activeId : conversations[0]?.id || null;
+        } else {
+          const legacy = JSON.parse(localStorage.getItem(LEGACY_HISTORY_KEY) || "[]");
+          if (Array.isArray(legacy) && legacy.length) {
+            const messages = legacy.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-40);
+            const item = { id: String(Date.now()), title: titleFor(messages), updatedAt: Date.now(), messages };
+            conversations.push(item); activeConversationId = item.id;
+          }
         }
-        if (history.length) $("status").textContent = "Conversación restaurada desde este navegador; los detalles de tareas y archivos no se guardan en el historial local.";
-      } catch { localStorage.removeItem(HISTORY_KEY); }
+        if (!conversations.length) {
+          const item = { id: String(Date.now()), title: "Nueva conversación", updatedAt: Date.now(), messages: [] };
+          conversations.push(item); activeConversationId = item.id;
+        }
+        const active = conversations.find(item => item.id === activeConversationId);
+        active.messages.forEach(item => { history.push({ role: item.role, content: item.content }); addMessage(item.role, "Historial local", item.content); });
+        persistConversations();
+        renderConversationList();
+        if (history.length) $("status").textContent = "Conversación restaurada; los detalles de tareas y archivos no se guardan en el historial local.";
+      } catch {
+        try { localStorage.removeItem(HISTORY_KEY); localStorage.removeItem(LEGACY_HISTORY_KEY); } catch {}
+        const item = { id: String(Date.now()), title: "Nueva conversación", updatedAt: Date.now(), messages: [] };
+        conversations.push(item); activeConversationId = item.id; persistConversations(); renderConversationList();
+      }
     }
 
     $("export-chat").addEventListener("click", () => {
@@ -715,23 +740,26 @@
       const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
       const link = document.createElement("a");
       link.href = url;
-      link.download = "elyntro-conversacion.md";
+      link.download = `${(conversations.find(item => item.id === activeConversationId)?.title || "elyntro-conversacion").replace(/[^a-z0-9_-]+/gi, "-").slice(0, 50)}.md`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
 
     $("clear-history").addEventListener("click", () => {
-      if (!window.confirm("¿Borrar la conversación visible y los mensajes guardados en este navegador? Esta acción no se puede deshacer.")) return;
-      if (busy && activeController) activeController.abort();
+      if (!window.confirm("¿Borrar todas las conversaciones y los mensajes guardados en este navegador? Esta acción no se puede deshacer.")) return;
+      if (busy) { $("status").textContent = "Espera a que termine la petición antes de borrar el historial."; return; }
       conversation.replaceChildren();
       history.splice(0, history.length);
-      try { localStorage.removeItem(HISTORY_KEY); } catch {}
+      try { localStorage.removeItem(HISTORY_KEY); localStorage.removeItem(LEGACY_HISTORY_KEY); } catch {}
       attachedText = null;
       $("attachment").replaceChildren();
       $("file-input").value = "";
       $("welcome").hidden = false;
       $("suggestions").hidden = false;
-      $("status").textContent = "Historial local borrado. El tema visual se conserva.";
+      conversations.splice(0, conversations.length);
+      activeConversationId = null;
+      createConversation();
+      $("status").textContent = "Todas las conversaciones locales se han borrado. El tema visual se conserva."
       $("prompt").focus();
     });
 
@@ -772,8 +800,6 @@
         $("file-input").value = "";
       }
     });
-    $("open-creative-studio").addEventListener("click", () => { window.location.href = "/creative-studio"; });
-
     document.querySelectorAll("[data-prompt]").forEach((button) => {
       button.addEventListener("click", () => {
         $("prompt").value = button.dataset.prompt;
@@ -799,6 +825,124 @@
         $("model-label").textContent = "Proveedor sin comprobar";
       }
     }
+
+    function csrfToken() {
+      const match = document.cookie.match(/(?:^|; )elyntro_csrf=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : "";
+    }
+
+    async function identityFetch(path, options = {}) {
+      const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+      if (options.method && options.method !== "GET") headers["X-Elyntro-CSRF"] = csrfToken();
+      const response = await fetch(path, { credentials: "same-origin", ...options, headers });
+      const data = await responseJson(response);
+      if (!response.ok) throw new Error(data.error || ("Error de identidad HTTP " + response.status));
+      return data;
+    }
+
+    async function syncOneConversation(item) {
+      if (!identityUser || !item || syncRunning) return;
+      syncRunning = true;
+      try {
+        const result = await identityFetch("/api/identity/sync/conversations/" + encodeURIComponent(item.id), {
+          method: "PUT",
+          body: JSON.stringify({ data: { id: item.id, title: item.title, updatedAt: item.updatedAt, messages: item.messages.slice(-40) },
+            expected_version: sharedVersions.has(item.id) ? sharedVersions.get(item.id) : null })
+        });
+        sharedVersions.set(item.id, result.version);
+        $("identity-status").textContent = "Sesión activa · conversación sincronizada";
+      } catch (error) {
+        $("identity-status").textContent = "Sesión activa · sincronización pendiente: " + error.message;
+      } finally { syncRunning = false; }
+    }
+
+    async function deleteSharedConversation(id) {
+      try {
+        await identityFetch("/api/identity/sync/conversations/" + encodeURIComponent(id), { method: "DELETE", body: "{}" });
+        sharedVersions.delete(id);
+      } catch (error) {
+        $("identity-status").textContent = "Eliminada localmente; no se pudo sincronizar el borrado: " + error.message;
+      }
+    }
+
+    async function loadSharedConversations() {
+      try {
+        const response = await identityFetch("/api/identity/sync/conversations", { method: "GET" });
+        for (const item of (response.items || [])) {
+          if (!item || typeof item.key !== "string" || !item.data || typeof item.data !== "object") continue;
+          sharedVersions.set(item.key, item.version);
+          const remote = item.data;
+          if (typeof remote.id !== "string" || !Array.isArray(remote.messages)) continue;
+          const clean = { id: remote.id, title: String(remote.title || "Conversación").slice(0, 120),
+            updatedAt: Number(remote.updatedAt) || Date.parse(item.updated_at) || Date.now(),
+            messages: remote.messages.filter(m => m && ["user", "assistant"].includes(m.role) && typeof m.content === "string").slice(-40) };
+          const index = conversations.findIndex(local => local.id === clean.id);
+          if (index < 0) conversations.push(clean);
+          else if (clean.updatedAt > conversations[index].updatedAt) conversations[index] = clean;
+        }
+        if (!conversations.length) createConversation();
+        if (!conversations.some(item => item.id === activeConversationId)) activeConversationId = conversations[0]?.id || null;
+        persistConversations();
+        renderConversationList();
+        if (activeConversationId) switchConversation(activeConversationId);
+        for (const item of conversations) {
+          if (!sharedVersions.has(item.id)) await syncOneConversation(item);
+        }
+        $("identity-status").textContent = "Sesión activa · conversaciones sincronizadas";
+      } catch (error) {
+        if (error.message.includes("No encontrado")) $("identity-status").textContent = "Sesión activa · aún no hay datos compartidos";
+        else $("identity-status").textContent = "Sesión activa · " + error.message;
+      }
+    }
+
+    async function refreshIdentity() {
+      try {
+        const data = await identityFetch("/api/identity/me", { method: "GET" });
+        identityUser = data.user;
+        $("identity-status").textContent = "Sesión: " + identityUser.email;
+        $("identity-login").hidden = true; $("identity-register").hidden = true;
+        $("identity-email").hidden = true; $("identity-password").hidden = true;
+        $("identity-logout").hidden = false;
+        await loadSharedConversations();
+      } catch (error) {
+        identityUser = null;
+        $("identity-status").textContent = error.message.includes("configurada")
+          ? "Base de datos aún no configurada en el servidor."
+          : "Inicia sesión para sincronizar tus conversaciones entre dispositivos.";
+      }
+    }
+
+    async function submitIdentity(mode) {
+      const email = $("identity-email").value.trim();
+      const password = $("identity-password").value;
+      try {
+        const data = await identityFetch("/api/identity/" + mode, {
+          method: "POST", body: JSON.stringify({ email, password })
+        });
+        identityUser = data.user;
+        sharedVersions.clear();
+        $("identity-password").value = "";
+        $("identity-login").hidden = true; $("identity-register").hidden = true;
+        $("identity-email").hidden = true; $("identity-password").hidden = true;
+        $("identity-logout").hidden = false;
+        $("identity-status").textContent = "Sesión iniciada: " + identityUser.email;
+        await loadSharedConversations();
+      } catch (error) { $("identity-status").textContent = error.message; }
+    }
+
+    $("identity-login").addEventListener("click", () => submitIdentity("login"));
+    $("identity-register").addEventListener("click", () => submitIdentity("register"));
+    $("identity-logout").addEventListener("click", async () => {
+      try {
+        await identityFetch("/api/identity/logout", { method: "POST", body: "{}" });
+        identityUser = null; sharedVersions.clear();
+        $("identity-login").hidden = false; $("identity-register").hidden = false;
+        $("identity-email").hidden = false; $("identity-password").hidden = false;
+        $("identity-logout").hidden = true;
+        $("identity-status").textContent = "Sesión cerrada.";
+      } catch (error) { $("identity-status").textContent = error.message; }
+    });
+
     try {
       if (localStorage.getItem(THEME_KEY) === "light") {
         document.body.classList.add("light");
