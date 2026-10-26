@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
+from elyntro_api_v1 import api_v1
 from werkzeug.middleware.proxy_fix import ProxyFix
 from elyntro import CognitiveLoop, EvidenceVerifier
 from elyntro.contracts import TaskRequest
@@ -45,6 +46,7 @@ def resolve_db_path() -> Path:
 
 DB_PATH = str(resolve_db_path())
 app = Flask(__name__, static_folder="static")
+app.register_blueprint(api_v1)
 # Render sits behind one trusted reverse proxy; normalize client IP and HTTPS metadata.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
@@ -247,8 +249,7 @@ def _groq_chat(goal: str, direct: bool = False) -> dict:
         detail = None
         code = None
         kind = None
-        if raw:
-            try:
+        if raw:            try:
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict):
                     err = parsed.get("error", parsed)
@@ -497,8 +498,7 @@ def classify_request(goal: str) -> str:
         return "research"
     if any(w in text for w in artifact_verbs):
         return "create"
-    if any(w in text for w in analyze_words):
-        return "analyze"
+    if any(w in text for w in analyze_words):        return "analyze"
     return "chat"
 
 def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=False):
@@ -747,8 +747,7 @@ def _review_research_answer(goal, answer, pages):
     if not result.get("text"):
         return {"status": "review_unavailable", "flags": [], "note": "No se pudo completar la revisión de respaldo."}
     try:
-        report = json.loads(result["text"])
-        status = report.get("supported") if report.get("supported") in {"mostly", "mixed", "weak"} else "mixed"
+        report = json.loads(result["text"])        status = report.get("supported") if report.get("supported") in {"mostly", "mixed", "weak"} else "mixed"
         return {"status": status, "unsupported_claims": report.get("unsupported_claims", [])[:6],
                 "missing_caveats": report.get("missing_caveats", [])[:6], "source_conflicts": report.get("source_conflicts", [])[:4],
                 "note": "Revisión automática de coherencia con las fuentes; no constituye verificación independiente de la verdad."}
@@ -997,8 +996,7 @@ def execute_unified():
             "kind": "answer",
             "route": route,
             "route_reason": route_reason,
-            "route_source": route_source,
-            "answer": result["text"],
+            "route_source": route_source,            "answer": result["text"],
             "provider": "groq",
             "requested_model": result.get("requested_model"),
             "returned_model": result.get("model"),
