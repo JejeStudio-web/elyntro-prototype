@@ -29,9 +29,9 @@ permissions:
   contents: read
 
 env:
-  RECORDS: ${{ inputs.records || '300' }}
-  PRETRAIN_STEPS: ${{ inputs.pretrain_steps || '100' }}
-  SFT_STEPS: ${{ inputs.sft_steps || '50' }}
+  RECORDS: ${{ github.event.inputs.records || '300' }}
+  PRETRAIN_STEPS: ${{ github.event.inputs.pretrain_steps || '100' }}
+  SFT_STEPS: ${{ github.event.inputs.sft_steps || '50' }}
 
 jobs:
   train-small-experiment:
