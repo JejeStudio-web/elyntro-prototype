@@ -186,6 +186,68 @@ def browser_inspect():
     return jsonify({"ok": True, "snapshot": snapshot, "mode": "read_only", "actions_taken": []})
 
 
+@creative_api.post("/browser/act")
+def browser_act():
+    """Execute a small, auditable set of non-form browser navigation actions."""
+    if not _authorized():
+        return _json_error("Se requiere una clave API de Elyntro configurada.", 401)
+    if os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() != "true":
+        return _json_error("El control Playwright está desactivado por defecto.", 503)
+    try:
+        from playwright.sync_api import sync_playwright
+        from search_providers import is_public_http_url
+    except Exception:
+        return _json_error("Playwright no está instalado en este entorno.", 503)
+    payload = request.get_json(silent=True) or {}
+    url, actions = payload.get("url"), payload.get("actions", [])
+    allowed = [x.strip().lower() for x in os.getenv("ELYNTRO_BROWSER_ALLOWLIST", "").split(",") if x.strip()]
+    if not isinstance(url, str) or not is_public_http_url(url):
+        return _json_error("Solo se admiten URL HTTP(S) públicas validadas.", 400)
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if not allowed or not any(host == d or host.endswith("." + d) for d in allowed):
+        return _json_error("El dominio no está en ELYNTRO_BROWSER_ALLOWLIST.", 403)
+    if not isinstance(actions, list) or len(actions) > 8:
+        return _json_error("actions debe ser una lista de hasta 8 acciones.", 400)
+    for action in actions:
+        if not isinstance(action, dict) or action.get("type") not in {"click_link", "scroll"}:
+            return _json_error("Solo se admiten click_link y scroll; no se permiten formularios ni botones de acción.", 400)
+        if action["type"] == "click_link" and (not isinstance(action.get("text"), str) or not action["text"].strip() or len(action["text"]) > 160):
+            return _json_error("click_link requiere texto exacto de enlace (máximo 160 caracteres).", 400)
+        if action["type"] == "scroll" and action.get("direction") not in {"up", "down"}:
+            return _json_error("scroll.direction debe ser up o down.", 400)
+    completed = []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 800}, accept_downloads=False)
+            def guard_request(route):
+                candidate = route.request.url
+                candidate_host = (urllib.parse.urlsplit(candidate).hostname or "").lower()
+                if not is_public_http_url(candidate) or not any(candidate_host == d or candidate_host.endswith("." + d) for d in allowed):
+                    route.abort()
+                else:
+                    route.continue_()
+            page.route("**/*", guard_request)
+            page.goto(url, wait_until="domcontentloaded", timeout=12000)
+            for action in actions:
+                if action["type"] == "scroll":
+                    page.evaluate("(direction) => window.scrollBy(0, direction === 'down' ? Math.min(window.innerHeight * 0.8, 640) : -Math.min(window.innerHeight * 0.8, 640))", action["direction"])
+                    completed.append({"type": "scroll", "direction": action["direction"], "ok": True})
+                else:
+                    locator = page.get_by_role("link", name=action["text"].strip(), exact=True).first
+                    locator.click(timeout=3000)
+                    page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    final_host = (urllib.parse.urlsplit(page.url).hostname or "").lower()
+                    if not is_public_http_url(page.url) or not any(final_host == d or final_host.endswith("." + d) for d in allowed):
+                        raise ValueError("La navegación intentó salir de la allowlist.")
+                    completed.append({"type": "click_link", "text": action["text"].strip(), "ok": True, "url": page.url})
+            snapshot = page.evaluate("""() => ({title: document.title.slice(0,300), url: location.href, text: (document.body?.innerText || '').slice(0,12000)})""")
+            browser.close()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": "La sesión de navegador no pudo completar todas las acciones.", "detail": type(exc).__name__, "actions_completed": completed}), 502
+    return jsonify({"ok": True, "mode": "ephemeral_allowlisted", "actions_completed": completed, "snapshot": snapshot})
+
+
 @creative_api.post("/founder/proposals")
 def founder_proposal():
     if not _authorized(founder=True):
