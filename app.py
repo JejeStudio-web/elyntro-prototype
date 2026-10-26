@@ -65,7 +65,7 @@ def _load_task_token_secret() -> bytes:
     try:
         fd = os.open(str(secret_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        return secret_path.read_bytes().strip()
+        return secret_path.read_bytes()
     try:
         secret = secrets.token_bytes(32)
         with os.fdopen(fd, "wb") as handle:
