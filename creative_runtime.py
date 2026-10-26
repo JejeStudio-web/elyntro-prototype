@@ -262,10 +262,12 @@ def browser_act():
     if not isinstance(actions, list) or len(actions) > 8:
         return _json_error("actions debe ser una lista de hasta 8 acciones.", 400)
     for action in actions:
-        if not isinstance(action, dict) or action.get("type") not in {"click_link", "scroll"}:
-            return _json_error("Solo se admiten click_link y scroll; no se permiten formularios ni botones de acción.", 400)
-        if action["type"] == "click_link" and (not isinstance(action.get("text"), str) or not action["text"].strip() or len(action["text"]) > 160):
-            return _json_error("click_link requiere texto exacto de enlace (máximo 160 caracteres).", 400)
+        if not isinstance(action, dict) or action.get("type") not in {"click_link", "click_button", "hover_text", "scroll"}:
+            return _json_error("Acción no admitida. Usa click_link, click_button, hover_text o scroll.", 400)
+        if action["type"] in {"click_link", "click_button", "hover_text"} and (not isinstance(action.get("text"), str) or not action["text"].strip() or len(action["text"]) > 160):
+            return _json_error("La acción requiere texto exacto de hasta 160 caracteres.", 400)
+        if action["type"] == "click_button" and re.search(r"delete|remove|purchase|buy|pay|submit|send|confirm|logout|log out|eliminar|borrar|comprar|pagar|enviar|confirmar|cerrar sesión", action["text"], re.I):
+            return _json_error("El botón parece destructivo o transaccional; Elyntro no lo pulsará.", 400)
         if action["type"] == "scroll" and action.get("direction") not in {"up", "down"}:
             return _json_error("scroll.direction debe ser up o down.", 400)
     completed = []
