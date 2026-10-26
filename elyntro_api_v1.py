@@ -40,7 +40,7 @@ def _config():
     if provider == "openai-compatible" and not base_url:
         base_url = ""
     return {
-        "provider": provider, "supported": True, "configured": bool(key and model and base_url),
+        "provider": provider, "supported": True, "configured": bool((key or provider == "ollama") and model and base_url),
         "model": model or None, "base_url": base_url, "key_env": key_env, "api_key": key,
     }
 
@@ -147,10 +147,11 @@ def chat_completions():
     http_request = Request(
         config["base_url"] + "/chat/completions",
         data=json.dumps(body).encode("utf-8"),
-        headers={"Authorization": "Bearer " + config["api_key"], "Content-Type": "application/json",
-                 "User-Agent": "Elyntro/1.0"},
+        headers={"Content-Type": "application/json", "User-Agent": "Elyntro/1.0"},
         method="POST",
     )
+    if config["api_key"]:
+        http_request.add_unredirected_header("Authorization", "Bearer " + config["api_key"])
     started = time.monotonic()
     try:
         with urlopen(http_request, timeout=45) as response:
