@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101421">
+  <meta name="theme-color" content="#10131c">
+  <meta name="description" content="Elyntro: un espacio de inteligencia para investigar, razonar, crear y ejecutar tareas con verificación transparente.">
   <title>Elyntro · Espacio de trabajo</title>
   <style>
     :root {
@@ -214,6 +215,7 @@
     .delivery-warning { padding:9px 11px; border:1px solid #8b7548; border-radius:10px; color:#e8d3a2; background:#8b754814; font-size:11px; }
     body.light .delivery-warning { color:#795c1f; background:#fff8e5; }
     .mobile-brand { display: none; }
+    .menu-toggle { display:none; }
     .top-actions { display: flex; align-items: center; gap: 8px; }
     .utility-button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: #ffffff08; color: var(--text); font-size: 11px; }
     .utility-button:hover { border-color: var(--accent-strong); background: #ffffff12; }
@@ -269,13 +271,132 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
     }
+      /* Elyntro Workspace UI refresh: clear hierarchy, restrained color, responsive controls. */
+    :root {
+      --bg:#10131c; --panel:#171c28; --panel-raised:#202738; --line:#2d3548;
+      --text:#f1f3fa; --muted:#a0a9bd; --accent:#c3cbff; --accent-strong:#8797ff;
+      --teal:#91decf; --radius:20px;
+    }
+    body { background:radial-gradient(ellipse at 50% -22%,#30385a 0,transparent 46%),var(--bg); letter-spacing:-.01em; }
+    .shell { grid-template-columns:270px minmax(0,1fr); }
+    .sidebar { position:sticky; top:0; height:100vh; overflow:auto; padding:24px 16px 18px; gap:22px; background:rgba(15,19,30,.92); border-right:1px solid #ffffff12; backdrop-filter:blur(22px); }
+    .brand { padding:0 7px; font-size:21px; letter-spacing:-.8px; }
+    .mark { width:40px; height:40px; border-radius:14px; box-shadow:inset 0 1px #ffffff25,0 5px 18px #0002; }
+    .new-task { padding:13px 15px; border-radius:14px; background:linear-gradient(135deg,#46539a,#303b70); box-shadow:inset 0 1px #ffffff24; transition:transform .18s,filter .18s; }
+    .new-task:hover { transform:translateY(-1px); filter:brightness(1.08); }
+    .identity-box { padding:10px; border-radius:14px; background:#ffffff04; }
+    .side-label { margin-top:4px; font-size:10px; letter-spacing:1.7px; }
+    .nav { gap:4px; }
+    .nav button { min-height:43px; padding:11px 12px; border-radius:12px; font-size:13px; transition:background .15s,border-color .15s; }
+    .nav button.active { background:#8998ff17; border-color:#8998ff30; color:#f4f5ff; }
+    .nav button:hover { background:#ffffff0b; }
+    .nav-icon { font-size:17px; }
+    .conversation-list { gap:3px; max-height:28vh; }
+    .conversation-item button { padding:9px 10px; font-size:12px; }
+    .side-note { line-height:1.65; background:#ffffff03; }
+    .main { min-height:100vh; }
+    .topbar { position:sticky; top:0; z-index:15; min-height:68px; padding:12px clamp(16px,3vw,42px); background:#10131ce8; border-bottom-color:#ffffff10; }
+    .section-title { font-size:13px; letter-spacing:-.01em; }
+    .top-actions { gap:6px; }
+    .connection { gap:6px; }
+    .badge { padding:6px 9px; font-size:10px; background:#ffffff03; }
+    .utility-button { padding:8px 11px; border-radius:11px; font-size:11px; transition:background .15s,border-color .15s; }
+    .workspace { width:min(1120px,100%); padding:clamp(34px,7vh,82px) clamp(18px,4vw,58px) 28px; }
+    .intro { margin-bottom:34px; }
+    .eyebrow { display:inline-flex; align-items:center; gap:8px; padding:7px 11px; border:1px solid #8f9eff2e; border-radius:99px; background:#8f9eff0b; font-size:10px; letter-spacing:1.4px; }
+    .eyebrow:before { content:""; width:6px; height:6px; border-radius:50%; background:var(--teal); box-shadow:0 0 12px #91decf66; }
+    h1 { margin:20px 0 13px; font-size:clamp(34px,5.4vw,58px); letter-spacing:-2.3px; line-height:1.04; }
+    .intro p { font-size:15px; line-height:1.7; }
+    .suggestions { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; width:min(820px,100%); margin:0 auto 34px; }
+    .suggestion { position:relative; min-height:122px; padding:19px 18px; border-radius:17px; background:linear-gradient(145deg,#1c2333e8,#171d2bcc); text-align:left; overflow:hidden; }
+    .suggestion:before { content:""; display:block; width:27px; height:3px; margin-bottom:15px; border-radius:99px; background:linear-gradient(90deg,var(--accent-strong),var(--teal)); opacity:.9; }
+    .suggestion strong { margin-bottom:7px; font-size:14px; letter-spacing:-.15px; }
+    .suggestion span { max-width:270px; font-size:12px; line-height:1.55; }
+    .suggestion:hover { transform:translateY(-3px); border-color:#8797ff80; box-shadow:0 12px 30px #0002; }
+    .conversation { width:min(850px,100%); gap:24px; margin-bottom:25px; }
+    .message { border-radius:20px; }
+    .message.user { width:fit-content; max-width:min(82%,760px); padding:14px 18px; border-radius:20px 20px 6px 20px; background:#2a3350; border-color:#5966a0; }
+    .message.user .message-head { margin-bottom:5px; }
+    .message.assistant { padding:24px clamp(18px,3vw,30px); border-color:#ffffff10; background:transparent; box-shadow:none; }
+    .message.assistant .message-head { margin-bottom:14px; }
+    .message-body { font-size:15px; line-height:1.85; }
+    .message-body p { margin-bottom:14px; }
+    .message-body h1,.message-body h2,.message-body h3 { letter-spacing:-.5px; }
+    .message-body h2 { margin-top:28px; }
+    .message-body pre { border-radius:14px; }
+    .response-actions { border-top:0; padding-top:8px; }
+    .response-actions button,.followup-chip { padding:7px 10px; border-radius:10px; font-size:11px; }
+    .composer-wrap { position:sticky; z-index:12; bottom:0; width:min(850px,100%); padding:14px 0 max(14px,env(safe-area-inset-bottom)); background:linear-gradient(180deg,transparent 0%,var(--bg) 24%); }
+    .composer { padding:11px 12px 10px; border:1px solid #444e69; border-radius:22px; background:color-mix(in srgb,var(--panel) 94%,transparent); box-shadow:0 20px 60px #0004; }
+    .composer:focus-within { border-color:#8797ff; box-shadow:0 0 0 3px #8797ff19,0 20px 60px #0004; }
+    textarea { min-height:64px; padding:12px 13px; font-size:15px; resize:none; }
+    .composer-tools { padding:2px 3px 7px; }
+    .attach-button { padding:7px 10px; border-radius:10px; font-size:11px; }
+    .composer-bottom { padding:5px 3px 2px 10px; }
+    .composer-note { font-size:10px; }
+    .send { min-height:40px; padding:10px 15px; border-radius:13px; font-size:12px; box-shadow:0 4px 14px #8e9cff24; transition:filter .15s,transform .15s; }
+    .send:hover:not(:disabled) { filter:brightness(1.06); transform:translateY(-1px); }
+    .statusline { padding:8px 7px 0; }
+    .footnote { line-height:1.6; }
+    .result-card { padding:16px; border-radius:15px; }
+    .result-card h3 { font-size:13px; }
+    .delivery-step { padding:12px 0; }
+    button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible { outline:2px solid var(--accent-strong); outline-offset:3px; }
+    [hidden] { display:none !important; }
+    body.light { background:radial-gradient(ellipse at 50% -22%,#e2e7ff 0,transparent 46%),var(--bg); }
+    body.light .sidebar,body.light .topbar { background:#f7f8fce8; }
+    body.light .suggestion { background:linear-gradient(145deg,#fff,#f4f6fd); }
+    body.light .message.assistant { background:transparent; }
+    body.light .message.user { background:#e6eaff; }
+    body.light .composer { background:#ffffffed; }
+    @media (min-width:1200px) { .shell { grid-template-columns:280px minmax(0,1fr); } }
+    @media (max-width:900px) {
+      .shell { grid-template-columns:220px minmax(0,1fr); }
+      .sidebar { padding:20px 12px; }
+      .topbar { gap:10px; }
+      .connection .badge:last-child { display:none; }
+      .workspace { padding-right:24px; padding-left:24px; }
+    }
+    @media (max-width:680px) {
+      .shell { display:block; }
+      .sidebar { position:fixed; z-index:40; inset:0 auto 0 0; display:flex; width:min(310px,86vw); height:100dvh; transform:translateX(-105%); transition:transform .22s ease; box-shadow:18px 0 55px #0006; }
+      body.sidebar-open .sidebar { transform:translateX(0); }
+      body.sidebar-open:after { content:""; position:fixed; z-index:30; inset:0; background:#05081299; backdrop-filter:blur(2px); }
+      .mobile-brand { flex:0 0 auto; }
+      .menu-toggle { display:inline-flex; align-items:center; justify-content:center; }
+      .topbar { min-height:62px; padding:10px 12px; align-items:center; gap:9px; }
+      .section-title { display:none; }
+      .top-actions { min-width:0; margin-left:auto; }
+      .top-actions .connection { display:none; }
+      .utility-button { padding:7px 8px; font-size:10px; }
+      #clear-history { display:none; }
+      .mobile-conversation-controls { position:relative; z-index:2; padding:8px 12px; }
+      .workspace { padding:30px 15px 12px; }
+      .intro { margin-bottom:27px; }
+      h1 { font-size:38px; letter-spacing:-1.6px; }
+      .intro p { font-size:13px; }
+      .suggestions { grid-template-columns:1fr; gap:9px; margin-bottom:26px; }
+      .suggestion { min-height:94px; padding:15px 16px; }
+      .suggestion:before { margin-bottom:10px; }
+      .conversation { gap:17px; }
+      .message.user { max-width:92%; }
+      .message.assistant { padding:14px 3px; }
+      .message-body { font-size:14px; line-height:1.78; }
+      .composer-wrap { padding-top:10px; }
+      .composer { border-radius:19px; }
+      .composer-note { max-width:58%; line-height:1.4; }
+      .send { padding:10px 12px; }
+      .footnote { font-size:9px; }
+    }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; transition:none !important; animation:none !important; } }
+
   </style>
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar" aria-label="Navegación principal">
       <div class="brand"><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
-      <section class="identity-box" aria-label="Cuenta Elyntro">
+      <details class="identity-details"><summary>Cuenta y sincronización</summary><section class="identity-box" aria-label="Cuenta Elyntro">
         <strong>Cuenta y sincronización</strong>
         <input id="identity-email" type="email" autocomplete="email" maxlength="254" placeholder="Correo electrónico" aria-label="Correo electrónico">
         <input id="identity-password" type="password" autocomplete="current-password" minlength="12" maxlength="1024" placeholder="Contraseña (12 caracteres mínimo)" aria-label="Contraseña">
@@ -287,7 +408,7 @@
         <p id="identity-status" role="status">Comprobando identidad compartida…</p>
         <input id="founder-token" type="password" autocomplete="off" placeholder="Token de creador (opcional)" aria-label="Token de creador">
         <p class="artifact-meta">Solo se envía con peticiones que empiezan por [245jg&amp;]. Se guarda en esta pestaña.</p>
-      </section>
+      </section></details>
       <button class="new-task" id="new-task" type="button">＋ &nbsp; Nueva tarea</button>
       <div>
         <p class="side-label">Conversaciones</p><div class="conversation-list" id="conversation-list" aria-label="Conversaciones guardadas"></div><p class="side-label">Espacio de trabajo</p>
@@ -304,7 +425,7 @@
 
     <div class="main">
       <header class="topbar">
-        <div class="mobile-brand"><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
+        <div class="mobile-brand"><button class="utility-button menu-toggle" id="menu-toggle" type="button" aria-label="Abrir navegación" aria-expanded="false">☰</button><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
         <div class="section-title">Asistente · Ejecución verificable</div>
         <div class="top-actions">
           <div class="connection" aria-live="polite">
@@ -324,15 +445,16 @@
 
       <main class="workspace">
         <section class="intro" id="welcome">
-          <div class="eyebrow">Un espacio de trabajo para resolver tareas</div>
-          <h1>¿Qué necesitas resolver?</h1>
-          <p>Describe tu objetivo. Elyntro puede responder, planificar una tarea registrada, buscar fuentes cuando el proveedor esté disponible y mostrar los resultados y límites observados.</p>
+          <div class="eyebrow">Tu espacio de inteligencia</div>
+          <h1>¿Qué vamos a resolver<br>hoy?</h1>
+          <p>Empieza con una idea, una pregunta o un objetivo. Elyntro puede ayudarte a investigar, razonar, crear y ejecutar tareas, mostrando qué ha comprobado y qué sigue pendiente.</p>
         </section>
 
         <section class="suggestions" id="suggestions" aria-label="Ejemplos de tareas">
-          <button class="suggestion" data-prompt="Explícame cómo funciona el aprendizaje adaptativo con un ejemplo sencillo."><strong>Aprender algo</strong><span>Una explicación adaptada a tu pregunta.</span></button>
-          <button class="suggestion" data-prompt="Analiza esta idea de proyecto: una aplicación que ayude a organizar tareas y aprender mejor. Identifica riesgos y prioridades."><strong>Analizar una idea</strong><span>Evaluación y límites de la comprobación.</span></button>
-          <button class="suggestion" data-prompt="Crea una página web de presentación para un proyecto científico, con objetivo, método y resultados."><strong>Crear un artefacto</strong><span>Genera un archivo descargable desde la tarea.</span></button>
+          <button class="suggestion" data-prompt="Investiga a fondo este tema con fuentes actuales. Separa los hechos comprobados, las inferencias y las dudas pendientes: "><strong>Investigar con fuentes</strong><span>Contrasta información y distingue evidencia de hipótesis.</span></button>
+          <button class="suggestion" data-prompt="Analiza rigurosamente esta idea. Compara alternativas, supuestos, riesgos, costes de oportunidad y recomienda la mejor opción: "><strong>Razonar y decidir</strong><span>Compara opciones y señala los puntos débiles.</span></button>
+          <button class="suggestion" data-prompt="Crea un artefacto completo y descargable para este objetivo. Define requisitos, constrúyelo y verifica el resultado: "><strong>Crear algo real</strong><span>Produce un archivo y comprueba lo que se pueda validar.</span></button>
+          <button class="suggestion" data-prompt="Convierte este objetivo en un plan ejecutable con pasos dependientes, criterios de éxito, riesgos y comprobaciones finales: "><strong>Ejecutar un proyecto</strong><span>Planificación, seguimiento y revisión del resultado.</span></button>
         </section>
 
         <div id="search-panel" hidden style="width:min(880px,100%);margin:0 auto 12px">
@@ -345,15 +467,15 @@
           <form id="composer-form">
             <div class="composer">
               <div class="composer-tools">
-                <button class="attach-button" id="attach-file" type="button">＋ Adjuntar texto</button>
+                <button class="attach-button" id="attach-file" type="button">＋ Adjuntar archivos</button>
                 <button class="attach-button voice-button" id="voice-input" type="button" title="Dictado por voz si el navegador lo admite">Dictar</button>
                 <button class="attach-button" id="stop-request" type="button" hidden>Detener</button>
-                <input id="file-input" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden>
+                <input id="file-input" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" multiple hidden>
                 <span id="attachment" aria-live="polite"></span>
               </div>
               <textarea id="prompt" maxlength="10000" rows="2" placeholder="Escribe lo que necesitas…" aria-label="Tu petición" required></textarea>
               <div class="composer-bottom">
-                <span class="composer-note">Texto y archivos .txt/.md/.csv/.json · máximo 8 KB por archivo</span>
+                <span class="composer-note">Archivos de texto .txt/.md/.csv/.json · hasta 5 archivos, 8 KB en total</span>
                 <button class="send" id="send" type="submit">Ejecutar
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
                 </button>
@@ -416,13 +538,32 @@
         }
         if (last < raw.length) parent.append(document.createTextNode(raw.slice(last)));
       };
-      for (const line of lines) {
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex];
         if (/^\x60\x60\x60/.test(line)) {
           if (codeLines) { codeNode._code.textContent = codeLines.join("\n"); container.append(codeNode); codeLines = null; codeNode = null; }
           else { codeLines = []; codeNode = element("pre"); const code = element("code"); codeNode.append(code); codeNode._code = code; }
           list = null; continue;
         }
         if (codeLines) { codeLines.push(line); codeNode._code.textContent = codeLines.join("\n"); continue; }
+        const separator = lines[lineIndex + 1] || "";
+        if (line.includes("|") && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separator)) {
+          const cells = (raw) => raw.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(value => value.trim());
+          const table = document.createElement("table");
+          const thead = document.createElement("thead");
+          const headerRow = document.createElement("tr");
+          for (const value of cells(line)) { const th = document.createElement("th"); inline(th, value); headerRow.append(th); }
+          thead.append(headerRow); table.append(thead);
+          const tbody = document.createElement("tbody");
+          lineIndex += 2;
+          while (lineIndex < lines.length && lines[lineIndex].includes("|") && lines[lineIndex].trim()) {
+            const row = document.createElement("tr");
+            for (const value of cells(lines[lineIndex])) { const td = document.createElement("td"); inline(td, value); row.append(td); }
+            tbody.append(row); lineIndex++;
+          }
+          lineIndex--;
+          table.append(tbody); container.append(table); list = null; continue;
+        }
         if (!line.trim()) { list = null; continue; }
         if (/^---+$/.test(line.trim())) { list = null; container.append(document.createElement("hr")); continue; }
         const h = line.match(/^(#{1,3})\s+(.+)$/);
@@ -678,7 +819,7 @@
       $("prompt").value = "";
       $("send").disabled = true;
       $("stop-request").hidden = false;
-      $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
+      $("status").textContent = "Solicitud enviada. Preparando ejecución y seguimiento del progreso…";
       const requestHistory = history.slice(-10);
       addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo adjunto: ${attachedText.name}]` : ""));
       // The attachment content is sent only in the current request; never persist it in local history.
@@ -1031,40 +1172,93 @@
 
     $("attach-file").addEventListener("click", () => $("file-input").click());
     $("file-input").addEventListener("change", async () => {
-      const file = $("file-input").files?.[0];
-      if (!file) return;
-      const allowed = /\.(txt|md|csv|json)$/i.test(file.name);
-      if (!allowed) { $("status").textContent = "Formato no admitido. Usa .txt, .md, .csv o .json."; $("file-input").value = ""; return; }
-      if (file.size > 8192) { $("status").textContent = "El archivo supera el límite de 8 KB."; $("file-input").value = ""; return; }
+      const files = Array.from($("file-input").files || []);
+      if (!files.length) return;
       try {
-        const content = await file.text();
-        if (content.includes("\u0000")) throw new Error("El archivo parece binario; adjunta un archivo de texto.");
-        attachedText = { name: file.name.replace(/[\\/]/g, "_").slice(0, 100), content };
-        const chip = element("span", "attachment-chip", `${attachedText.name} · ${file.size} B`);
+        if (files.length > 5) throw new Error("Puedes adjuntar hasta 5 archivos de texto por petición.");
+        const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+        if (totalBytes > 8192) throw new Error("Los archivos adjuntos superan el límite combinado de 8 KB.");
+        const parts = [];
+        for (const file of files) {
+          if (!/\.(txt|md|csv|json)$/i.test(file.name)) throw new Error(`Formato no admitido: ${file.name}. Usa .txt, .md, .csv o .json.`);
+          const content = await file.text();
+          if (content.includes("\u0000")) throw new Error(`${file.name} parece binario; solo se admiten archivos de texto.`);
+          const safeName = file.name.replace(/[\\/]/g, "_").slice(0, 100);
+          parts.push({ name: safeName, content });
+        }
+        attachedText = {
+          name: parts.map(part => part.name).join(", "),
+          content: parts.map(part => `--- Archivo: ${part.name} ---\n${part.content}\n--- Fin de ${part.name} ---`).join("\n\n"),
+        };
+        const chip = element("span", "attachment-chip", `${parts.length} archivo${parts.length === 1 ? "" : "s"} · ${totalBytes.toLocaleString()} B`);
+        const names = element("span", "", parts.map(part => part.name).join(", "));
         const remove = element("button", "", "×");
         remove.type = "button";
-        remove.setAttribute("aria-label", "Quitar archivo adjunto");
+        remove.setAttribute("aria-label", "Quitar archivos adjuntos");
         remove.addEventListener("click", () => {
           attachedText = null;
           $("attachment").replaceChildren();
           $("file-input").value = "";
         });
-        chip.append(remove);
+        chip.append(names, remove);
         $("attachment").replaceChildren(chip);
-        $("status").textContent = "Archivo leído en el navegador y listo para incluir en la petición.";
+        $("status").textContent = `${parts.length} archivo${parts.length === 1 ? "" : "s"} leído${parts.length === 1 ? "" : "s"} en el navegador y listo${parts.length === 1 ? "" : "s"} para la petición.`;
       } catch (error) {
         attachedText = null;
         $("attachment").replaceChildren();
-        $("status").textContent = error.message || "No se pudo leer el archivo.";
+        $("status").textContent = error.message || "No se pudieron leer los archivos.";
         $("file-input").value = "";
       }
     });
     document.querySelectorAll("[data-prompt]").forEach((button) => {
       button.addEventListener("click", () => {
+        if (button.closest(".nav")) {
+          document.querySelectorAll(".nav button").forEach(item => { item.classList.remove("active"); item.removeAttribute("aria-current"); });
+          button.classList.add("active"); button.setAttribute("aria-current", "page");
+          document.body.classList.remove("sidebar-open");
+          $("menu-toggle")?.setAttribute("aria-expanded", "false");
+        }
         $("prompt").value = button.dataset.prompt;
+        $("prompt").dispatchEvent(new Event("input", { bubbles: true }));
         $("prompt").focus();
       });
     });
+
+    $("menu-toggle")?.addEventListener("click", () => {
+      const open = document.body.classList.toggle("sidebar-open");
+      $("menu-toggle").setAttribute("aria-expanded", String(open));
+      $("menu-toggle").setAttribute("aria-label", open ? "Cerrar navegación" : "Abrir navegación");
+    });
+    document.addEventListener("click", (event) => {
+      if (document.body.classList.contains("sidebar-open") && event.target === document.body) {
+        document.body.classList.remove("sidebar-open");
+        $("menu-toggle")?.setAttribute("aria-expanded", "false");
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        document.body.classList.remove("sidebar-open");
+        $("menu-toggle")?.setAttribute("aria-expanded", "false");
+        if (!$("search-panel").hidden) { $("search-panel").hidden = true; $("search-input").value = ""; $("search-results").textContent = ""; }
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        $("search-panel").hidden = false;
+        $("search-input").focus();
+      }
+    });
+    $("prompt").addEventListener("input", () => {
+      const field = $("prompt");
+      field.style.height = "auto";
+      field.style.height = Math.min(field.scrollHeight, 220) + "px";
+    });
+    $("prompt").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        if (!busy) submitPrompt($("prompt").value);
+      }
+    });
+
 
     async function checkHealth() {
       const dot = $("health-dot");
