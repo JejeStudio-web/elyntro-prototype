@@ -242,6 +242,7 @@
           <button class="active" type="button" aria-current="page"><span class="nav-icon">◈</span> Asistente</button>
           <button type="button" data-prompt="Investiga fuentes sobre "><span class="nav-icon">⌕</span> Investigación</button>
           <button type="button" data-prompt="Analiza esta idea: "><span class="nav-icon">⌁</span> Análisis</button>
+          <button type="button" id="open-creative-studio"><span class="nav-icon">◇</span> Estudio 3D</button>
           <button type="button" data-prompt="Crea un documento sobre "><span class="nav-icon">▧</span> Creación</button>
         </nav>
       </div>
@@ -683,6 +684,7 @@
         $("composer-form").requestSubmit();
       }
     });
+    $("open-creative-studio").addEventListener("click", () => { window.location.href = "/creative-studio"; });
     $("new-task").addEventListener("click", createConversation);
     $("mobile-new-conversation").addEventListener("click", createConversation);
     $("mobile-conversation-select").addEventListener("change", (event) => switchConversation(event.target.value));
