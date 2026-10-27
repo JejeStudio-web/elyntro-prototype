@@ -79,7 +79,7 @@ def _model_pool():
             continue
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}", model_id) or model_id in seen:
             continue
-        if not re.fullmatch(r"https://[^\\s]+|http://(?:127\\.0\\.0\\.1|localhost)(?::[0-9]+)?(?:/[^\\s]*)?", base_url):
+        if not re.fullmatch(r"https://[^\s]+|http://(?:127\.0\.0\.1|localhost)(?::[0-9]+)?(?:/[^\s]*)?", base_url):
             continue
         if key_env and not re.fullmatch(r"[A-Z][A-Z0-9_]{1,99}", key_env):
             continue
