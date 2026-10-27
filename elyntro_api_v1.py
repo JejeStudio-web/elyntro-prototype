@@ -7,6 +7,10 @@ Streaming and bounded image inputs are supported where the configured provider/m
 from __future__ import annotations
 
 import json
+import html
+import re
+import urllib.parse
+from html.parser import HTMLParser
 import os
 import re
 import secrets
@@ -16,6 +20,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
+from tool_runtime import safe_calculate
+from search_providers import TavilySearchProvider, fetch_public_http
 
 api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 MAX_MESSAGES = 20
@@ -161,6 +167,64 @@ def _stream_completion(config, body):
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
+class _PlainTextHTML(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.hidden = 0
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style", "noscript", "svg"}:
+            self.hidden += 1
+    def handle_endtag(self, tag):
+        if tag in {"script", "style", "noscript", "svg"} and self.hidden:
+            self.hidden -= 1
+    def handle_data(self, data):
+        if not self.hidden and data.strip():
+            self.parts.append(data.strip())
+
+
+_PUBLIC_TOOL_SCHEMAS = [
+    {"type": "function", "function": {"name": "calculate", "description": "Evalúa aritmética segura sin ejecutar código.", "parameters": {"type": "object", "properties": {"expression": {"type": "string", "maxLength": 180}}, "required": ["expression"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "web_search", "description": "Busca páginas web reales mediante el proveedor de búsqueda configurado.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "maxLength": 400}}, "required": ["query"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "web_open", "description": "Lee el texto de una URL pública HTTP(S) con protección SSRF.", "parameters": {"type": "object", "properties": {"url": {"type": "string", "maxLength": 1000}}, "required": ["url"], "additionalProperties": False}}},
+]
+
+
+def _execute_public_tool(name, arguments):
+    if not isinstance(arguments, dict):
+        return {"ok": False, "error": "Los argumentos deben ser un objeto JSON."}
+    if name == "calculate":
+        result = safe_calculate(arguments.get("expression"))
+        return result if isinstance(result, dict) else {"ok": True, "result": result}
+    if name == "web_search":
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip() or len(query) > 400:
+            return {"ok": False, "error": "query debe contener entre 1 y 400 caracteres."}
+        results, error = TavilySearchProvider().search(query.strip(), limit=5)
+        if error and not results:
+            return {"ok": False, "error": "La búsqueda web no está configurada o no pudo completarse.", "code": error}
+        return {"ok": True, "results": results[:5], "warning": "Los resultados de búsqueda son pistas, no verificación independiente."}
+    if name == "web_open":
+        url = arguments.get("url")
+        if not isinstance(url, str) or len(url) > 1000:
+            return {"ok": False, "error": "url no válida."}
+        response, error = fetch_public_http(url, timeout=8, max_bytes=350_000, max_redirects=3)
+        if error or not response or response.get("status", 500) >= 400:
+            return {"ok": False, "error": "No se pudo recuperar esa página pública.", "code": error or "http_error"}
+        content_type = str(response.get("headers", {}).get("Content-Type", "")).lower()
+        if "text/html" not in content_type and "text/plain" not in content_type:
+            return {"ok": False, "error": "La URL no devuelve HTML o texto plano."}
+        body = response["body"].decode("utf-8", errors="replace")
+        parser = _PlainTextHTML()
+        if "text/html" in content_type:
+            parser.feed(body)
+            text_content = re.sub(r"\\s+", " ", " ".join(parser.parts)).strip()
+        else:
+            text_content = body
+        return {"ok": True, "url": response.get("url"), "content": text_content[:12000]}
+    return {"ok": False, "error": "Herramienta no permitida."}
 
 
 def _error(message, status, code, retryable=False):
