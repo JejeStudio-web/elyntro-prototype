@@ -32,7 +32,23 @@ def _authorized(founder: bool = False) -> bool:
     header = request.headers.get("Authorization", "")
     bearer = header[7:].strip() if header.lower().startswith("bearer ") else ""
     supplied = bearer or request.headers.get("X-Elyntro-Founder-Token" if founder else "X-Elyntro-API-Key", "")
-    return bool(supplied) and secrets.compare_digest(supplied, expected)
+    if supplied and expected and secrets.compare_digest(supplied, expected):
+        return True
+    if founder:
+        return False
+    try:
+        from shared_identity import current_user
+        user = current_user()
+    except Exception:
+        user = None
+    if not user:
+        return False
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        csrf_cookie = request.cookies.get("elyntro_csrf", "")
+        csrf_header = request.headers.get("X-Elyntro-CSRF", "")
+        if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+            return False
+    return True
 
 
 def _json_error(message: str, status: int):
@@ -129,6 +145,25 @@ def _proxy_browser_worker(endpoint: str):
         return _json_error("El worker privado rechazó la petición.", exc.code)
     except (urllib.error.URLError, TimeoutError, OSError, ValueError, UnicodeDecodeError) as exc:
         return jsonify({"ok": False, "error": "No se pudo contactar con el worker privado.", "detail": type(exc).__name__}), 502
+
+
+@creative_api.get("/comfyui/models")
+def comfyui_models():
+    if not _authorized():
+        return _json_error("Inicia sesión o configura una clave API de Elyntro.", 401)
+    base = _comfy_base()
+    if not base:
+        return _json_error("ComfyUI no está configurado.", 503)
+    req = urllib.request.Request(base + "/object_info/CheckpointLoaderSimple", headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as response:
+            data = json.loads(response.read(256_000).decode("utf-8"))
+        models = data.get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[]])[0]
+        if not isinstance(models, list):
+            models = []
+        return jsonify({"ok": True, "models": [str(x) for x in models[:100] if isinstance(x, str)]})
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError, AttributeError, IndexError) as exc:
+        return jsonify({"ok": False, "error": "No se pudieron consultar los modelos de ComfyUI.", "detail": type(exc).__name__}), 502
 
 
 @creative_api.post("/comfyui/generate")

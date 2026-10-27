@@ -80,6 +80,16 @@
     .nav button:hover, .nav button.active { border-color: #ffffff10; background: #ffffff0b; color: var(--text); }
     .nav-icon { width: 18px; color: var(--accent); text-align: center; }
     .side-note { margin-top: auto; padding: 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); font-size: 12px; }
+    .account-card { display:grid; gap:7px; padding:11px; border:1px solid var(--line); border-radius:13px; background:#171d2b88; }
+    .account-title { font-size:11px; font-weight:750; letter-spacing:.5px; }
+    .account-card input { width:100%; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font:inherit; font-size:11px; }
+    .account-actions { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+    .account-card button { padding:7px 6px; border:1px solid #465274; border-radius:8px; background:#252f4b; color:var(--text); font-size:10px; }
+    .account-status { margin:0; color:var(--muted); font-size:10px; overflow-wrap:anywhere; }
+    .founder-panel { border:1px solid var(--line); border-radius:12px; padding:10px; font-size:11px; }
+    .founder-panel summary { cursor:pointer; font-weight:700; color:var(--accent); }
+    .founder-panel input { width:100%; margin:8px 0; padding:8px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font:inherit; }
+    .founder-panel button { width:100%; padding:7px; border:1px solid #465274; border-radius:8px; background:#252f4b; color:var(--text); font:inherit; font-size:10px; }
     .conversation-list { display: grid; gap: 4px; max-height: 34vh; overflow: auto; }
     .mobile-conversation-controls { display: none; }
     .conversation-item { display: flex; gap: 5px; min-width: 0; }
@@ -235,6 +245,20 @@
   <div class="shell">
     <aside class="sidebar" aria-label="Navegación principal">
       <div class="brand"><div class="mark" aria-hidden="true">e</div><span>elyntro</span></div>
+      <section class="account-card" aria-label="Cuenta y sincronización">
+        <div class="account-title" id="account-title">Cuenta y sincronización</div>
+        <input id="account-email" type="email" autocomplete="username" placeholder="Correo electrónico" aria-label="Correo electrónico">
+        <input id="account-password" type="password" autocomplete="current-password" minlength="12" maxlength="1024" placeholder="Contraseña (mín. 12 caracteres)" aria-label="Contraseña">
+        <div class="account-actions"><button id="account-login" type="button">Iniciar sesión</button><button id="account-register" type="button">Crear cuenta</button></div>
+        <button id="account-logout" type="button" hidden>Cerrar sesión</button>
+        <p class="account-status" id="account-status" aria-live="polite">Comprobando almacenamiento compartido…</p>
+      </section>
+      <details class="founder-panel">
+        <summary>Founder Mode · creador</summary>
+        <input id="founder-token-input" type="password" autocomplete="off" placeholder="Token configurado en Render" aria-label="Token de Founder Mode">
+        <button id="founder-token-save" type="button">Validar en esta pestaña</button>
+        <p class="account-status" id="founder-status" aria-live="polite">El token no se guarda en el historial ni en localStorage.</p>
+      </details>
       <button class="new-task" id="new-task" type="button">＋ &nbsp; Nueva tarea</button>
       <div>
         <p class="side-label">Conversaciones</p><div class="conversation-list" id="conversation-list" aria-label="Conversaciones guardadas"></div><p class="side-label">Espacio de trabajo</p>
@@ -320,7 +344,11 @@
     const history = [];
     const HISTORY_KEY = "elyntro.conversations.v2";
     const LEGACY_HISTORY_KEY = "elyntro.conversation.v1";
+    const LOCAL_OWNER_KEY = "elyntro.local.owner.v1";
+    const GUEST_BACKUP_KEY = "elyntro.guest.backup.v1";
     const conversations = [];
+    let identityUser = null, cloudSyncTimer = null, cloudSyncBusy = false, applyingCloudData = false;
+    const cloudVersions = new Map();
     let activeConversationId = null;
     const THEME_KEY = "elyntro.theme.v1";
     let busy = false;
@@ -568,9 +596,20 @@
       activeController = controller;
       const timeout = window.setTimeout(() => controller.abort(), 120000);
       try {
+        const requestHeaders = { "Content-Type": "application/json" };
+        if (fullPrompt.startsWith("[245jg&]")) {
+          let founderToken = "";
+          try { founderToken = sessionStorage.getItem("elyntro.founder.token.v1") || ""; } catch {}
+          if (!founderToken) {
+            pending.body.textContent = "Founder Mode requiere el token del creador. Abre el panel Founder Mode de la barra lateral y valídalo.";
+            $("status").textContent = "Falta autenticar Founder Mode.";
+            return;
+          }
+          requestHeaders["X-Elyntro-Founder-Token"] = founderToken;
+        }
         const response = await fetch("/api/agent/execute", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: requestHeaders,
           body: JSON.stringify({ goal: fullPrompt, history: requestHistory }),
           signal: controller.signal,
         });
@@ -685,6 +724,11 @@
       }
     });
     $("open-creative-studio").addEventListener("click", () => { window.location.href = "/creative-studio"; });
+    $("account-login").addEventListener("click", () => authenticateAccount("login"));
+    $("account-register").addEventListener("click", () => authenticateAccount("register"));
+    $("account-logout").addEventListener("click", logoutAccount);
+    $("account-password").addEventListener("keydown", event => { if (event.key === "Enter") authenticateAccount("login"); });
+    $("founder-token-save").addEventListener("click", validateFounderToken);
     $("new-task").addEventListener("click", createConversation);
     $("mobile-new-conversation").addEventListener("click", createConversation);
     $("mobile-conversation-select").addEventListener("change", (event) => switchConversation(event.target.value));
@@ -702,6 +746,7 @@
           items: conversations.map(item => ({ ...item, messages: item.messages.slice(-40) }))
         }));
       } catch { $("status").textContent = "No se pudieron guardar las conversaciones en este navegador."; }
+      if (identityUser && !applyingCloudData) queueCloudSync();
     }
 
     function saveHistory() {
@@ -901,6 +946,133 @@
       });
     });
 
+
+    function readCookie(name) {
+      const prefix = name + "=";
+      const item = document.cookie.split(";").map(part => part.trim()).find(part => part.startsWith(prefix));
+      return item ? decodeURIComponent(item.slice(prefix.length)) : "";
+    }
+    async function identityRequest(path, options = {}) {
+      const method = String(options.method || "GET").toUpperCase(), headers = { ...(options.headers || {}) };
+      if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      if (["POST","PUT","DELETE","PATCH"].includes(method)) { const csrf = readCookie("elyntro_csrf"); if (csrf) headers["X-Elyntro-CSRF"] = csrf; }
+      return fetch(path, { ...options, method, headers, credentials:"same-origin" });
+    }
+    function showAccountState(message) {
+      $("account-status").textContent = message;
+      $("account-title").textContent = identityUser ? "Cuenta · " + identityUser.email : "Cuenta y sincronización";
+      for (const id of ["account-email","account-password","account-login","account-register"]) $(id).hidden = Boolean(identityUser);
+      $("account-logout").hidden = !identityUser;
+    }
+    async function authenticateAccount(mode) {
+      const email = $("account-email").value.trim(), password = $("account-password").value;
+      if (!email || !password) { showAccountState("Introduce correo y contraseña."); return; }
+      if (mode === "register" && password.length < 12) { showAccountState("La contraseña debe tener al menos 12 caracteres."); return; }
+      const button = $(mode === "register" ? "account-register" : "account-login");
+      button.disabled = true; showAccountState(mode === "register" ? "Creando cuenta…" : "Iniciando sesión…");
+      try {
+        const response = await identityRequest("/api/identity/" + mode, {method:"POST",body:JSON.stringify({email,password})});
+        const data = await responseJson(response); if (!response.ok) throw new Error(data.error || "HTTP " + response.status);
+        $("account-password").value = ""; await acceptSignedInUser(data.user);
+      } catch (error) { showAccountState(error.message || "No se pudo completar la autenticación."); }
+      finally { button.disabled = false; }
+    }
+    async function acceptSignedInUser(user) {
+      if (!user || typeof user.user_id !== "string") throw new Error("El servidor no devolvió una identidad válida.");
+      const previousOwner = (() => { try { return localStorage.getItem(LOCAL_OWNER_KEY); } catch { return null; } })();
+      const hasLocal = conversations.some(item => item.messages && item.messages.length);
+      let importLocal = false;
+      if (previousOwner && previousOwner !== user.user_id) {
+        try { localStorage.setItem(GUEST_BACKUP_KEY,localStorage.getItem(HISTORY_KEY)||""); localStorage.removeItem(HISTORY_KEY); localStorage.removeItem(LEGACY_HISTORY_KEY); } catch {}
+        conversations.splice(0); history.splice(0); activeConversationId = null; restoreHistory();
+      } else if (!previousOwner && hasLocal) {
+        importLocal = window.confirm("¿Quieres importar las conversaciones guardadas en este navegador a la cuenta " + user.email + "? Si cancelas, se conservarán como copia local y no se subirán.");
+        if (!importLocal) {
+          try { localStorage.setItem(GUEST_BACKUP_KEY,localStorage.getItem(HISTORY_KEY)||""); localStorage.removeItem(HISTORY_KEY); localStorage.removeItem(LEGACY_HISTORY_KEY); } catch {}
+          conversations.splice(0); history.splice(0); activeConversationId = null; restoreHistory();
+        }
+      }
+      identityUser = user; try { localStorage.setItem(LOCAL_OWNER_KEY,user.user_id); } catch {}
+      showAccountState("Cuenta activa. Cargando conversaciones compartidas…"); await syncConversations({importLocal});
+    }
+    async function initIdentity() {
+      try {
+        const response = await identityRequest("/api/identity/me");
+        if (response.ok) { const data = await responseJson(response); await acceptSignedInUser(data.user); return; }
+        if (response.status === 401) { showAccountState("Inicia sesión para sincronizar entre dispositivos."); return; }
+        const sr = await identityRequest("/api/identity/status"), status = await responseJson(sr);
+        showAccountState(status.database_configured ? "La base de datos compartida no responde; sincronización pausada." : "Pendiente: configurar ELYNTRO_DATABASE_URL en Render.");
+        $("account-register").disabled = !status.registration_enabled;
+      } catch { showAccountState("No se pudo comprobar la cuenta. El historial local sigue disponible."); }
+    }
+    function queueCloudSync() {
+      if (!identityUser || applyingCloudData) return;
+      window.clearTimeout(cloudSyncTimer); cloudSyncTimer = window.setTimeout(() => syncConversations({importLocal:true}),900);
+    }
+    async function syncConversations({importLocal=false}={}) {
+      if (!identityUser || cloudSyncBusy) return;
+      cloudSyncBusy = true; applyingCloudData = true;
+      try {
+        const response = await identityRequest("/api/identity/sync/conversations"), data = await responseJson(response);
+        if (!response.ok) throw new Error(data.error || "HTTP " + response.status);
+        const remote = new Map();
+        for (const item of (Array.isArray(data.items)?data.items:[])) {
+          if (!item || typeof item.key!=="string" || !item.data || !Array.isArray(item.data.messages)) continue;
+          const record = {...item.data,id:item.data.id||item.key,messages:item.data.messages.slice(-40)};
+          remote.set(record.id,{record,version:item.version}); cloudVersions.set(record.id,item.version);
+        }
+        for (const [id,cloud] of remote) {
+          const index = conversations.findIndex(item=>item.id===id);
+          if (index<0) conversations.push({...cloud.record,syncVersion:cloud.version});
+          else if (Number(cloud.record.updatedAt||0)>Number(conversations[index].updatedAt||0)) conversations[index]={...cloud.record,syncVersion:cloud.version};
+        }
+        for (const local of [...conversations]) {
+          const cloud = remote.get(local.id);
+          if (cloud && Number(cloud.record.updatedAt||0)>=Number(local.updatedAt||0)) continue;
+          if (!cloud && !importLocal && local.messages?.length) continue;
+          if (!local.id || local.id.length>160) continue;
+          const payload={data:{id:local.id,title:local.title||"Nueva conversación",updatedAt:Number(local.updatedAt)||Date.now(),messages:(local.messages||[]).slice(-40)}};
+          if (cloud) payload.expected_version=cloud.version;
+          const put=await identityRequest("/api/identity/sync/conversations/"+encodeURIComponent(local.id),{method:"PUT",body:JSON.stringify(payload)});
+          const saved=await responseJson(put);
+          if (put.status===409) { $("account-status").textContent="Conflicto de sincronización; vuelve a cargar antes de guardar."; continue; }
+          if (!put.ok) throw new Error(saved.error||"HTTP "+put.status);
+          cloudVersions.set(local.id,saved.version); local.syncVersion=saved.version;
+        }
+        const chosen=conversations.find(item=>item.id===activeConversationId)||conversations[0];
+        if (chosen) {
+          activeConversationId=chosen.id; history.splice(0,history.length,...chosen.messages.slice(-40).map(item=>({role:item.role,content:item.content})));
+          conversation.replaceChildren(); history.forEach(item=>addMessage(item.role,"Historial sincronizado",item.content));
+          $("welcome").hidden=history.length>0; $("suggestions").hidden=history.length>0;
+        }
+        renderConversationList();
+        localStorage.setItem(HISTORY_KEY,JSON.stringify({activeId:activeConversationId,items:conversations.map(item=>({id:item.id,title:item.title,updatedAt:item.updatedAt,messages:(item.messages||[]).slice(-40)}))}));
+        showAccountState("Sesión activa · sincronización compartida disponible.");
+      } catch (error) { showAccountState("Sesión activa, pero falló la sincronización: "+(error.message||"error")); }
+      finally { applyingCloudData=false; cloudSyncBusy=false; }
+    }
+    async function logoutAccount() {
+      try {
+        const response=await identityRequest("/api/identity/logout",{method:"POST",body:"{}"}),data=await responseJson(response);
+        if (!response.ok) throw new Error(data.error||"HTTP "+response.status);
+        identityUser=null; cloudVersions.clear(); showAccountState("Sesión cerrada. Las conversaciones locales permanecen en este dispositivo.");
+      } catch (error) { showAccountState("No se pudo cerrar la sesión: "+(error.message||"error")); }
+    }
+    async function validateFounderToken() {
+      const token=$("founder-token-input").value.trim();
+      if (!token) { $("founder-status").textContent="Introduce el token configurado como ELYNTRO_FOUNDER_TOKEN en Render."; return; }
+      $("founder-token-save").disabled=true;
+      try {
+        const response=await fetch("/api/creative/founder/proposals",{headers:{"X-Elyntro-Founder-Token":token}}),data=await responseJson(response);
+        if (!response.ok) throw new Error(data.error||"HTTP "+response.status);
+        sessionStorage.setItem("elyntro.founder.token.v1",token);
+        $("founder-status").textContent="Token validado. El modo creador solo crea propuestas que requieren revisión.";
+        $("founder-token-input").value="";
+      } catch (error) {
+        sessionStorage.removeItem("elyntro.founder.token.v1"); $("founder-status").textContent=error.message||"No se pudo validar el token.";
+      } finally { $("founder-token-save").disabled=false; }
+    }
+
     async function checkHealth() {
       const dot = $("health-dot");
       try {
@@ -933,6 +1105,7 @@
     } catch {}
     restoreHistory();
     checkHealth();
+    initIdentity();
   </script>
 </body>
 </html>

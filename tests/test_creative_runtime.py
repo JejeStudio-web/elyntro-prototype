@@ -408,3 +408,9 @@ def test_playwright_proxy_rejects_public_worker_hostname_before_sending_token(mo
         headers={"Authorization": "Bearer test-api-key"},
         json={"url": "https://example.com"})
     assert response.status_code == 503
+
+
+def test_comfyui_models_requires_authentication(monkeypatch):
+    monkeypatch.delenv("ELYNTRO_API_KEY", raising=False)
+    response = mod.app.test_client().get("/api/creative/comfyui/models")
+    assert response.status_code == 401
