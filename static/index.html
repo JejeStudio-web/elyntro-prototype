@@ -694,7 +694,7 @@
       const pending = addMessage("assistant", "En curso", "Esperando respuesta de la API…");
       const controller = new AbortController();
       activeController = controller;
-      const timeout = window.setTimeout(() => controller.abort(), 120000);
+      const timeout = window.setTimeout(() => controller.abort(), 1800000);
       try {
         const requestHeaders = { "Content-Type": "application/json" };
         if (String(fullPrompt).startsWith("[245jg&]")) {
@@ -708,12 +708,41 @@
           body: JSON.stringify({ goal: fullPrompt, history: requestHistory }),
           signal: controller.signal,
         });
-        const data = await responseJson(response);
+        let data = await responseJson(response);
         if (!response.ok) {
           pending.article.classList.add("error");
           renderFailure(pending.body, data, response.status);
           $("status").textContent = `La API respondió con error HTTP ${response.status}.`;
           return;
+        }
+        if (data.kind === "task" && data.task?.task_id && data.task_access_token &&
+            ["queued", "running"].includes(data.queue?.state)) {
+          const taskId = data.task.task_id;
+          const taskToken = data.task_access_token;
+          const terminalStates = new Set(["succeeded", "failed", "cancelled", "needs_approval"]);
+          pending.article.querySelector(".message-head span:last-child").textContent = "Ejecutando tarea";
+          const deadline = Date.now() + 25 * 60 * 1000;
+          while (!controller.signal.aborted && Date.now() < deadline) {
+            pending.body.replaceChildren();
+            renderTask(pending.body, data);
+            const queueState = data.queue?.state || "running";
+            const taskState = data.task?.status || "desconocido";
+            $("status").textContent = `Elyntro está trabajando: ${taskState.replaceAll("_", " ")} · cola: ${queueState.replaceAll("_", " ")}. Puedes seguir viendo el progreso aquí.`;
+            if (terminalStates.has(taskState) || ["succeeded", "failed", "cancelled", "needs_approval"].includes(queueState)) break;
+            await new Promise((resolve) => window.setTimeout(resolve, 1200));
+            const pollResponse = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+              method: "GET",
+              headers: { "Authorization": `Bearer ${taskToken}` },
+              credentials: "same-origin",
+              signal: controller.signal,
+            });
+            const pollData = await responseJson(pollResponse);
+            if (!pollResponse.ok) throw new Error(pollData.error || `No se pudo consultar la tarea (HTTP ${pollResponse.status}).`);
+            data = { ...data, ...pollData, kind: "task", task_access_token: taskToken };
+          }
+          if (!terminalStates.has(data.task?.status) && !["succeeded", "failed", "cancelled", "needs_approval"].includes(data.queue?.state)) {
+            $("status").textContent = "La espera terminó, pero el trabajo puede seguir ejecutándose en el servidor. Puedes consultar su estado más tarde.";
+          }
         }
         pending.body.replaceChildren();
         if (data.kind === "answer") {
