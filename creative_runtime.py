@@ -18,7 +18,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 
 creative_api = Blueprint("creative_api", __name__, url_prefix="/api/creative")
 MAX_PROMPT = 4000
@@ -27,6 +27,8 @@ MAX_BODY = 64 * 1024
 
 def _authorized(founder: bool = False) -> bool:
     expected = os.getenv("ELYNTRO_FOUNDER_TOKEN" if founder else "ELYNTRO_API_KEY", "").strip()
+    if not founder and session.get("elyntro_user_id"):
+        return True
     if not expected:
         return False
     header = request.headers.get("Authorization", "")
@@ -37,6 +39,14 @@ def _authorized(founder: bool = False) -> bool:
 
 def _json_error(message: str, status: int):
     return jsonify({"ok": False, "error": message}), status
+
+
+def _comfy_headers(extra=None):
+    headers = dict(extra or {})
+    key = os.getenv('COMFYUI_API_KEY', '').strip()
+    if key:
+        headers['Authorization'] = 'Bearer ' + key
+    return headers
 
 
 def _comfy_base() -> str:
@@ -58,7 +68,7 @@ def creative_status():
         "ok": True,
         "features": {
             "threejs_scene": {"available": True, "mode": "browser-local", "route": "/creative-studio"},
-            "comfyui": {"available": bool(_comfy_base()), "configured": bool(_comfy_base()),
+            "comfyui": {"available": bool(_comfy_base()), "configured": bool(_comfy_base()), "auth_configured": bool(os.getenv("COMFYUI_API_KEY", "").strip()),
                         "reason": None if _comfy_base() else "Configura COMFYUI_BASE_URL en el entorno donde se ejecuta ComfyUI o Elyntro."},
             "playwright": {"available": bool(os.getenv("ELYNTRO_BROWSER_WORKER_URL", "").strip() and os.getenv("ELYNTRO_BROWSER_WORKER_TOKEN", "").strip()), "enabled": os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() == "true", "mode": "private_worker"},
             "founder_mode": {"available": bool(os.getenv("ELYNTRO_FOUNDER_TOKEN", "").strip()), "proposal_only": True},
@@ -174,7 +184,7 @@ def comfyui_generate():
     if prompt_nodes == 0:
         return _json_error("No se pudo identificar el nodo CLIPTextEncode positivo. Conecta un sampler al nodo positive; los workflows ambiguos se rechazan.", 400)
     body = json.dumps({"prompt": workflow}).encode()
-    req = urllib.request.Request(base + "/prompt", data=body, headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(base + "/prompt", data=body, headers=_comfy_headers({"Content-Type": "application/json"}), method="POST")
     try:
         with urllib.request.urlopen(req, timeout=8) as response:
             data = json.loads(response.read(128_000).decode("utf-8"))
@@ -193,7 +203,7 @@ def comfyui_history(prompt_id: str):
         return _json_error("ComfyUI no está configurado.", 503)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", prompt_id):
         return _json_error("prompt_id no válido.", 400)
-    req = urllib.request.Request(base + "/history/" + urllib.parse.quote(prompt_id, safe=""))
+    req = urllib.request.Request(base + "/history/" + urllib.parse.quote(prompt_id, safe=""), headers=_comfy_headers())
     try:
         with urllib.request.urlopen(req, timeout=8) as response:
             data = json.loads(response.read(128_000).decode("utf-8"))
@@ -241,7 +251,7 @@ def comfyui_view(prompt_id: str, filename: str):
         if not isinstance(subfolder, str) or len(subfolder) > 240 or ".." in subfolder.split("/") or subfolder.startswith("/"):
             return _json_error("Ruta de salida no válida.", 400)
         query = urllib.parse.urlencode({"filename": filename, "subfolder": subfolder, "type": "output"})
-        image_req = urllib.request.Request(base + "/view?" + query, headers={"Accept": "image/png,image/jpeg,image/webp"})
+        image_req = urllib.request.Request(base + "/view?" + query, headers=_comfy_headers({"Accept": "image/png,image/jpeg,image/webp"}))
         with urllib.request.urlopen(image_req, timeout=12) as response:
             payload = response.read(8_000_001)
             media_type = response.headers.get_content_type()

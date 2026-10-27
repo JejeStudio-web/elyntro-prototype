@@ -258,12 +258,24 @@
             <span class="badge"><span class="dot" id="health-dot"></span><span id="health-label">Comprobando API…</span></span>
             <span class="badge" id="model-label">Modelo sin comprobar</span>
           </div>
+          <button class="utility-button" id="account-toggle" type="button" aria-label="Cuenta y sincronización">Cuenta</button>
           <button class="utility-button" id="search-chat" type="button" aria-label="Buscar en la conversación">Buscar</button>
           <button class="utility-button" id="theme-toggle" type="button" aria-label="Cambiar tema">Tema</button>
           <button class="utility-button" id="export-chat" type="button">Exportar</button>
           <button class="utility-button" id="clear-history" type="button" title="Borra los mensajes guardados en este navegador">Borrar historial</button>
         </div>
       </header>
+      <section id="account-panel" hidden style="width:min(880px,100%);margin:12px auto;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--panel)" aria-label="Cuenta y sincronización">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><strong>Cuenta y sincronización</strong><button type="button" id="account-close">Cerrar</button></div>
+        <p id="account-state" class="artifact-meta" aria-live="polite">Sin iniciar sesión. Las conversaciones solo están guardadas en este navegador.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin:12px 0">
+          <label>Correo electrónico<input id="account-email" type="email" autocomplete="username" maxlength="254" style="display:block;width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--text)"></label>
+          <label>Contraseña (mínimo 12 caracteres)<input id="account-password" type="password" autocomplete="current-password" minlength="12" maxlength="128" style="display:block;width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--text)"></label>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" id="account-register">Crear cuenta</button><button type="button" id="account-login">Iniciar sesión</button><button type="button" id="account-sync">Sincronizar ahora</button><button type="button" id="account-logout">Cerrar sesión</button></div>
+        <p id="account-status" class="artifact-meta" role="status"></p>
+        <p class="artifact-meta">El historial se sincroniza entre dispositivos al iniciar sesión. Usa una contraseña única. El correo aún no se verifica automáticamente.</p>
+      </section>
       <div class="mobile-conversation-controls" aria-label="Gestión de conversaciones">
         <select id="mobile-conversation-select" aria-label="Conversación activa"></select>
         <button type="button" id="mobile-new-conversation">Nueva</button>
@@ -321,7 +333,11 @@
     const HISTORY_KEY = "elyntro.conversations.v2";
     const LEGACY_HISTORY_KEY = "elyntro.conversation.v1";
     const conversations = [];
+    const deletedConversations = {};
     let activeConversationId = null;
+    let account = null;
+    let syncTimer = null;
+    let syncInFlight = false;
     const THEME_KEY = "elyntro.theme.v1";
     let busy = false;
     let attachedText = null;
@@ -685,6 +701,80 @@
       }
     });
     $("open-creative-studio").addEventListener("click", () => { window.location.href = "/creative-studio"; });
+    $("account-toggle").addEventListener("click", () => { $("account-panel").hidden = !$("account-panel").hidden; if (!$("account-panel").hidden) $("account-email").focus(); });
+    $("account-close").addEventListener("click", () => { $("account-panel").hidden = true; });
+
+    async function accountRequest(path, body, method) {
+      const response = await fetch("/api/account" + path, { method: method || (body ? "POST" : "GET"), credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+      return data;
+    }
+    function updateAccountUi() {
+      $("account-state").textContent = account ? "Sesión iniciada: " + account.email + ". La sincronización está activada." : "Sin iniciar sesión. Las conversaciones solo están guardadas en este navegador.";
+      $("account-toggle").textContent = account ? "Cuenta ✓" : "Cuenta";
+      $("account-logout").disabled = !account;
+      $("account-sync").disabled = !account;
+    }
+    async function authenticateAccount(mode) {
+      const email = $("account-email").value.trim();
+      const password = $("account-password").value;
+      const hadLocal = conversations.some(item => item.messages?.length);
+      $("account-status").textContent = "Conectando con la cuenta…";
+      try {
+        const data = await accountRequest("/" + mode, { email, password });
+        account = data.account;
+        updateAccountUi();
+        const remote = await accountRequest("/sync");
+        let merged;
+        if (hadLocal) {
+          const mergeLocal = window.confirm("¿Quieres fusionar las conversaciones guardadas en este dispositivo con la cuenta? Elige Cancelar para cargar solo el historial de la cuenta.");
+          merged = mergeLocal ? mergeConversationPayload(remote.payload, localConversationPayload()) : remote.payload;
+        } else merged = remote.payload;
+        const saved = await accountRequest("/sync", merged, "PUT");
+        applyConversationPayload(saved.payload);
+        $("account-password").value = "";
+        $("account-status").textContent = data.note || "Sesión iniciada y conversaciones sincronizadas.";
+      } catch (error) {
+        $("account-status").textContent = error.message;
+        if (mode === "register") account = null;
+        updateAccountUi();
+      }
+    }
+    $("account-register").addEventListener("click", () => authenticateAccount("register"));
+    $("account-login").addEventListener("click", () => authenticateAccount("login"));
+    $("account-sync").addEventListener("click", async () => {
+      if (!account) return;
+      $("account-status").textContent = "Sincronizando…";
+      try { const d = await accountRequest("/sync", localConversationPayload(), "PUT"); applyConversationPayload(d.payload); $("account-status").textContent = "Sincronización completada."; }
+      catch (error) { $("account-status").textContent = error.message; }
+    });
+    $("account-logout").addEventListener("click", async () => {
+      try { await accountRequest("/logout", {}); account = null; updateAccountUi(); $("account-status").textContent = "Sesión cerrada. Las conversaciones locales se conservan en este dispositivo."; }
+      catch (error) { $("account-status").textContent = error.message; }
+    });
+    async function restoreAccountSession() {
+      updateAccountUi();
+      try {
+        const me = await accountRequest("/me");
+        if (!me.authenticated) return;
+        account = me.account;
+        updateAccountUi();
+        const remote = await accountRequest("/sync");
+        const localHasMessages = conversations.some(item => item.messages?.length);
+        let merged = remote.payload;
+        if (localHasMessages) {
+          const remoteIds = new Set((remote.payload.items || []).map(item => item.id));
+          if (conversations.some(item => item.messages?.length && !remoteIds.has(item.id))) {
+            if (window.confirm("Hay conversaciones locales que no aparecen en tu cuenta. ¿Quieres fusionarlas?")) merged = mergeConversationPayload(remote.payload, localConversationPayload());
+          }
+        }
+        const saved = await accountRequest("/sync", merged, "PUT");
+        applyConversationPayload(saved.payload);
+      } catch (error) { $("account-status").textContent = "No se pudo restaurar la sesión/sincronización: " + error.message; }
+    }
+
+
     $("new-task").addEventListener("click", createConversation);
     $("mobile-new-conversation").addEventListener("click", createConversation);
     $("mobile-conversation-select").addEventListener("change", (event) => switchConversation(event.target.value));
@@ -695,13 +785,59 @@
       return title.length > 42 ? title.slice(0, 39) + "…" : title;
     }
 
-    function persistConversations() {
+    function localConversationPayload() {
+      return { activeId: activeConversationId, items: conversations.map(item => ({ ...item, messages: item.messages.slice(-40) })), deleted: { ...deletedConversations } };
+    }
+
+    function mergeConversationPayload(remote, local) {
+      const deleted = { ...(remote?.deleted || {}) };
+      for (const [id, stamp] of Object.entries(local?.deleted || {})) deleted[id] = Math.max(Number(deleted[id]) || 0, Number(stamp) || 0);
+      const byId = new Map();
+      for (const item of [...(remote?.items || []), ...(local?.items || [])]) {
+        if (!item || typeof item.id !== "string") continue;
+        const current = byId.get(item.id);
+        if (!current || (Number(item.updatedAt) || 0) >= (Number(current.updatedAt) || 0)) byId.set(item.id, item);
+      }
+      const items = [...byId.values()].filter(item => (Number(deleted[item.id]) || 0) < (Number(item.updatedAt) || 0)).sort((a,b)=>(Number(b.updatedAt)||0)-(Number(a.updatedAt)||0)).slice(0,100);
+      const ids = new Set(items.map(item => item.id));
+      const activeId = ids.has(local?.activeId) ? local.activeId : ids.has(remote?.activeId) ? remote.activeId : (items[0]?.id || null);
+      return { activeId, items, deleted: Object.fromEntries(Object.entries(deleted).slice(-500)) };
+    }
+
+    function applyConversationPayload(payload) {
+      const clean = mergeConversationPayload(payload, { items: [], deleted: {} });
+      conversations.splice(0, conversations.length, ...clean.items);
+      Object.keys(deletedConversations).forEach(key => delete deletedConversations[key]);
+      Object.assign(deletedConversations, clean.deleted);
+      activeConversationId = clean.activeId;
+      clearVisibleConversation();
+      const active = conversations.find(item => item.id === activeConversationId);
+      if (active) active.messages.slice(-40).forEach(item => { history.push({ role: item.role, content: item.content }); addMessage(item.role, "Historial sincronizado", item.content); });
+      persistConversations(false);
+      renderConversationList();
+    }
+
+    function scheduleAccountSync() {
+      if (!account) return;
+      window.clearTimeout(syncTimer);
+      syncTimer = window.setTimeout(async () => {
+        if (!account || syncInFlight) return;
+        syncInFlight = true;
+        try {
+          const data = await accountRequest("/sync", localConversationPayload(), "PUT");
+          applyConversationPayload(data.payload);
+          $("account-status").textContent = "Sincronización completada.";
+        } catch (error) {
+          $("account-status").textContent = "Cambios guardados localmente; sincronización pendiente: " + error.message;
+        } finally { syncInFlight = false; }
+      }, 900);
+    }
+
+    function persistConversations(shouldSync = true) {
       try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify({
-          activeId: activeConversationId,
-          items: conversations.map(item => ({ ...item, messages: item.messages.slice(-40) }))
-        }));
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(localConversationPayload()));
       } catch { $("status").textContent = "No se pudieron guardar las conversaciones en este navegador."; }
+      if (shouldSync) scheduleAccountSync();
     }
 
     function saveHistory() {
@@ -783,6 +919,7 @@
       if (busy && id === activeConversationId) { $("status").textContent = "No se puede eliminar la conversación mientras hay una petición en curso."; return; }
       const index = conversations.findIndex(item => item.id === id);
       if (index < 0) return;
+      deletedConversations[id] = Date.now();
       const wasActive = id === activeConversationId;
       conversations.splice(index, 1);
       if (wasActive) {
@@ -798,6 +935,7 @@
         const raw = localStorage.getItem(HISTORY_KEY);
         const saved = raw ? JSON.parse(raw) : null;
         if (saved && Array.isArray(saved.items)) {
+          if (saved.deleted && typeof saved.deleted === "object") Object.assign(deletedConversations, saved.deleted);
           saved.items.slice(0, 100).forEach(item => {
             if (!item || typeof item.id !== "string" || !Array.isArray(item.messages)) return;
             const messages = item.messages.filter(message => message && ["user", "assistant"].includes(message.role) && typeof message.content === "string").slice(-40);
@@ -842,6 +980,7 @@
     $("clear-history").addEventListener("click", () => {
       if (!window.confirm("¿Borrar todas las conversaciones y los mensajes guardados en este navegador? Esta acción no se puede deshacer.")) return;
       if (busy) { $("status").textContent = "Espera a que termine la petición antes de borrar el historial."; return; }
+      conversations.forEach(item => { deletedConversations[item.id] = Date.now(); });
       conversation.replaceChildren();
       history.splice(0, history.length);
       try { localStorage.removeItem(HISTORY_KEY); localStorage.removeItem(LEGACY_HISTORY_KEY); } catch {}
@@ -932,6 +1071,7 @@
       }
     } catch {}
     restoreHistory();
+    restoreAccountSession();
     checkHealth();
   </script>
 </body>

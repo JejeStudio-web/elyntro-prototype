@@ -31,6 +31,8 @@ from search_providers import TavilySearchProvider, fetch_public_http, is_public_
 import external_resources
 from tool_runtime import ToolRuntime, safe_calculate
 from creative_runtime import creative_api, _authorized as _founder_authorized, save_founder_proposal
+from account_api import account_api
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 BASE = Path(__file__).resolve().parent
@@ -48,8 +50,11 @@ def resolve_db_path() -> Path:
 
 DB_PATH = str(resolve_db_path())
 app = Flask(__name__, static_folder="static")
+app.secret_key = os.environ.get("ELYNTRO_SESSION_SECRET") or secrets.token_hex(32)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER_SERVICE_ID")), PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 app.register_blueprint(api_v1)
 app.register_blueprint(creative_api)
+app.register_blueprint(account_api)
 # Render sits behind one trusted reverse proxy; normalize client IP and HTTPS metadata.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
@@ -129,6 +134,9 @@ def _apply_api_limits():
         "/api/tasks": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/creative/founder/selfdev/pull-request": int(os.environ.get("ELYNTRO_RATE_LIMIT_SELFDEV_PER_MINUTE", "3")),
         "/api/creative/founder/proposals": int(os.environ.get("ELYNTRO_RATE_LIMIT_FOUNDER_PER_MINUTE", "10")),
+        "/api/account/register": int(os.environ.get("ELYNTRO_RATE_LIMIT_ACCOUNT_PER_MINUTE", "3")),
+        "/api/account/login": int(os.environ.get("ELYNTRO_RATE_LIMIT_ACCOUNT_PER_MINUTE", "5")),
+        "/api/account/sync": int(os.environ.get("ELYNTRO_RATE_LIMIT_SYNC_PER_MINUTE", "30")),
     }
     if request.method != "POST" or request.path not in limits:
         return None
