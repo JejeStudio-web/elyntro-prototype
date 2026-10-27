@@ -309,6 +309,7 @@
     let busy = false;
     let attachedText = null;
     let activeController = null;
+    let stopRequestedByUser = false;
 
     function element(tag, className, text) {
       const node = document.createElement(tag);
@@ -528,6 +529,7 @@
         return;
       }
       busy = true;
+      stopRequestedByUser = false;
       $("prompt").value = "";
       $("send").disabled = true;
       $("stop-request").hidden = false;
@@ -602,9 +604,13 @@
       } catch (error) {
         pending.article.classList.add("error");
         pending.body.textContent = error.name === "AbortError"
-          ? "Se agotó el tiempo de espera de la interfaz. La operación del servidor podría haber continuado."
+          ? (stopRequestedByUser
+            ? "Has detenido la espera desde la interfaz. La operación del servidor podría haber continuado."
+            : "Se agotó el tiempo de espera de la interfaz. La operación del servidor podría haber continuado.")
           : `No se pudo completar la petición: ${error.message}`;
-        $("status").textContent = "Error de comunicación o tiempo de espera.";
+        $("status").textContent = error.name === "AbortError" && stopRequestedByUser
+          ? "Espera detenida por el usuario."
+          : "Error de comunicación o tiempo de espera.";
       } finally {
         window.clearTimeout(timeout);
         busy = false;
@@ -631,7 +637,10 @@
       article.append(chips);
     }
     $("stop-request").addEventListener("click", () => {
-      if (activeController) activeController.abort();
+      if (activeController) {
+        stopRequestedByUser = true;
+        activeController.abort();
+      }
       $("status").textContent = "Se ha solicitado detener la espera. El servidor podría seguir procesando la tarea.";
     });
     $("search-chat").addEventListener("click", () => { const panel = $("search-panel"); panel.hidden = !panel.hidden; if (!panel.hidden) $("search-input").focus(); });
