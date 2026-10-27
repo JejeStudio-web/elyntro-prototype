@@ -168,6 +168,7 @@ def test_quick_chat_stream_returns_sse_delta_frames(monkeypatch):
     class FakeStream:
         def __enter__(self): return self
         def __exit__(self, *args): return False
+        def close(self): return None
         def __iter__(self):
             yield b'data: {"choices":[{"delta":{"content":"Hola"}}]}\n'
             yield b'data: [DONE]\n'
