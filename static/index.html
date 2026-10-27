@@ -938,6 +938,7 @@
         }
         if (fullPrompt.length > 10000) throw new Error("La transcripción y el mensaje superan 10.000 caracteres.");
         const visualFiles = currentMedia.filter(item => !audioFiles.includes(item));
+        if (visualFiles.length && fullPrompt.length > 8000) throw new Error("Para analizar imágenes o PDF, el texto de la petición debe ocupar como máximo 8.000 caracteres.");
         if (visualFiles.length) {
           const encodedAttachments = [];
           for (const item of visualFiles) encodedAttachments.push({
