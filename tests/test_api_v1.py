@@ -175,3 +175,108 @@ def test_v1_defaults_to_the_existing_groq_runtime(api_client, monkeypatch):
     assert response.status_code == 200
     assert response.get_json()["data"][0]["id"] == "openai/gpt-oss-20b"
     assert response.get_json()["data"][0]["owned_by"] == "groq"
+
+
+def test_v1_model_pool_lists_multiple_configured_models(api_client, monkeypatch):
+    monkeypatch.setenv("ELYNTRO_MODEL_POOL", json.dumps([
+        {"id": "fast", "provider": "groq", "model": "llama-3.3-70b-versatile",
+         "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "primary": True},
+        {"id": "reasoner", "provider": "openai", "model": "gpt-4.1-mini",
+         "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"},
+    ]))
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    response = api_client.get("/api/v1/models", headers=auth())
+    assert response.status_code == 200
+    models = response.get_json()["data"]
+    assert [model["id"] for model in models] == ["fast", "reasoner"]
+    assert models[0]["elyntro"]["primary"] is True
+    assert models[1]["owned_by"] == "openai"
+
+
+def test_v1_model_pool_routes_to_selected_upstream(api_client, monkeypatch):
+    import elyntro_api_v1 as module
+    monkeypatch.setenv("ELYNTRO_MODEL_POOL", json.dumps([
+        {"id": "fast", "provider": "groq", "model": "llama-3.3-70b-versatile",
+         "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "primary": True},
+        {"id": "reasoner", "provider": "openai", "model": "gpt-4.1-mini",
+         "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"},
+    ]))
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    seen = {}
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, limit):
+            return json.dumps({"model": "gpt-4.1-mini", "choices": [{"message": {"role": "assistant", "content": "ROUTED_OK"}, "finish_reason": "stop"}], "usage": {}}).encode()
+    def fake_urlopen(req, timeout):
+        seen["url"] = req.full_url
+        seen["auth"] = req.get_header("Authorization") or req.unredirected_hdrs.get("Authorization")
+        seen["model"] = json.loads(req.data)["model"]
+        return FakeResponse()
+    monkeypatch.setattr(module, "urlopen", fake_urlopen)
+    response = api_client.post("/api/v1/chat/completions", headers=auth(), json={
+        "model": "reasoner", "messages": [{"role": "user", "content": "test"}]
+    })
+    assert response.status_code == 200
+    assert response.get_json()["model"] == "reasoner"
+    assert response.get_json()["elyntro"]["provider"] == "openai"
+    assert seen == {"url": "https://api.openai.com/v1/chat/completions", "auth": "Bearer test-openai-key", "model": "gpt-4.1-mini"}
+
+
+def test_first_party_runtime_uses_same_primary_model_pool(api_client, monkeypatch):
+    import app as app_module
+    monkeypatch.setenv("ELYNTRO_MODEL_POOL", json.dumps([
+        {"id": "fast", "provider": "groq", "model": "llama-3.3-70b-versatile",
+         "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY"},
+        {"id": "reasoner", "provider": "openai", "model": "gpt-4.1-mini",
+         "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY", "primary": True},
+    ]))
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    config = app_module._model_provider_config()
+    assert config["provider"] == "openai"
+    assert config["model"] == "gpt-4.1-mini"
+    assert config["model_alias"] == "reasoner"
+    assert config["api_key"] == "test-openai-key"
+
+
+def test_runtime_model_pool_fails_over_after_provider_error(monkeypatch):
+    import app as app_module
+    pool = [
+        {"id": "primary", "provider": "broken", "model": "bad-model", "primary": True, "configured": True},
+        {"id": "backup", "provider": "healthy", "model": "good-model", "primary": False, "configured": True},
+    ]
+    monkeypatch.setattr(app_module, "_model_pool", lambda: pool)
+    calls = []
+    def fake_call(config, messages, **kwargs):
+        calls.append(config["id"])
+        if config["id"] == "primary":
+            return {"text": None, "error": "provider down", "error_code": "provider_unavailable", "retryable": True, "provider": "broken"}
+        return {"text": "Respuesta completa con pasos y un ejemplo concreto para resolver la petición.", "provider": "healthy", "model": "good-model"}
+    monkeypatch.setattr(app_module, "_call_model_config", fake_call)
+    result = app_module._groq_messages([{"role": "user", "content": "explica cómo resolver el problema"}])
+    assert calls == ["primary", "backup"]
+    assert result["text"].startswith("Respuesta completa")
+    assert result["providers_failed_over"] == 1
+    assert result["selection"] == "only_successful_candidate"
+
+
+def test_runtime_compares_successful_model_answers_and_selects_scored_candidate(monkeypatch):
+    import app as app_module
+    pool = [
+        {"id": "primary", "provider": "p1", "model": "m1", "primary": True, "configured": True},
+        {"id": "backup", "provider": "p2", "model": "m2", "primary": False, "configured": True},
+    ]
+    monkeypatch.setattr(app_module, "_model_pool", lambda: pool)
+    def fake_call(config, messages, **kwargs):
+        if config["id"] == "primary":
+            return {"text": "No lo sé.", "provider": "p1", "model": "m1"}
+        return {"text": "## Solución paso a paso\\n1. Analiza el problema.\\n2. Aplica el método.\\nPor ejemplo, comprueba el resultado y explica por qué funciona.", "provider": "p2", "model": "m2"}
+    monkeypatch.setattr(app_module, "_call_model_config", fake_call)
+    result = app_module._groq_messages([{"role": "user", "content": "explica una solución con ejemplo y pasos"}])
+    assert result["model_alias"] == "backup"
+    assert result["selection"] == "heuristic_quality_comparison"
+    assert result["models_compared"] == 2
+    assert len(result["comparison"]["candidates"]) == 2
