@@ -155,3 +155,37 @@ def test_image_generation_uses_configured_provider_and_returns_image(monkeypatch
     assert seen["url"] == "https://api.openai.com/v1/images/generations"
     assert seen["auth"] == "Bearer provider-secret"
     assert "provider-secret" not in response.get_data(as_text=True)
+
+
+def test_quick_chat_stream_returns_sse_delta_frames(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "_model_provider_config", lambda: {
+        "configured": True, "provider": "test-provider", "model": "test-model",
+        "base_url": "https://provider.example/v1", "api_key": "provider-secret",
+    })
+
+    class FakeStream:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"Hola"}}]}\\n'
+            yield b'data: [DONE]\\n'
+
+    seen = {}
+    def fake_urlopen(request, timeout):
+        seen["body"] = json.loads(request.data)
+        seen["auth"] = request.get_header("Authorization") or request.unredirected_hdrs.get("Authorization")
+        return FakeStream()
+
+    monkeypatch.setattr(app_module.urllib.request, "urlopen", fake_urlopen)
+    response = app_module.app.test_client().post("/api/chat/stream", json={
+        "goal": "Saluda", "history": [],
+    })
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert response.mimetype == "text/event-stream"
+    assert '"type": "delta", "text": "Hola"' in body
+    assert '"type": "done"' in body
+    assert seen["body"]["stream"] is True
+    assert seen["auth"] == "Bearer provider-secret"
