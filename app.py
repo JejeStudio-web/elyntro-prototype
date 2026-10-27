@@ -33,6 +33,7 @@ from tool_runtime import ToolRuntime, safe_calculate
 from creative_runtime import creative_api, _authorized as _founder_authorized, save_founder_proposal
 from shared_identity import identity_api, init_identity_schema
 from task_quality import build_delivery_report
+from durable_task_queue import DurableTaskQueue
 
 logger = logging.getLogger(__name__)
 BASE = Path(__file__).resolve().parent
@@ -398,6 +399,69 @@ def validate_artifact(criterion, evidence, context):
 verifier.register(CRITERION, validate_artifact)
 executor = TaskExecutor(engine, handlers=HANDLERS, verifier=verifier)
 loop = CognitiveLoop(engine, RuleBasedPlanner(), TOOLS, executor, verifier=verifier)
+
+
+def _process_durable_job(job: dict) -> dict:
+    """Run or resume one persisted task; worker failures never masquerade as success."""
+    task_request = TaskRequest(
+        goal=job["goal"],
+        constraints=job["constraints"],
+        success_criteria=job["success_criteria"],
+        idempotency_key=job["idempotency_key"],
+    )
+    result = loop.run(task_request, namespace=job["namespace"])
+    task = result.task
+    if task.status.value == "succeeded":
+        queue_state = "succeeded"
+    elif task.status.value == "needs_approval":
+        queue_state = "needs_approval"
+    elif task.status.value == "cancelled":
+        queue_state = "cancelled"
+    else:
+        queue_state = "failed"
+    return {
+        "queue_state": queue_state,
+        "task_status": task.status.value,
+        "verification": result.verification,
+        "plan_review": result.plan_review,
+    }
+
+
+background_queue = DurableTaskQueue(
+    DB_PATH,
+    _process_durable_job,
+    lease_seconds=int(os.environ.get("ELYNTRO_TASK_LEASE_SECONDS", "180")),
+    max_recoveries=int(os.environ.get("ELYNTRO_TASK_MAX_RECOVERIES", "5")),
+)
+background_queue.start()
+
+
+def _enqueue_task(goal: str, *, constraints: list[str], success_criteria: list[str],
+                  namespace: str = "prototype") -> tuple[dict, int]:
+    """Persist the task first, then enqueue it; clients can safely poll immediately."""
+    task_key = "elyntro-job:" + uuid.uuid4().hex
+    task_request = TaskRequest(
+        goal=goal.strip(), constraints=constraints,
+        success_criteria=success_criteria, idempotency_key=task_key,
+    )
+    task = engine.submit(task_request)
+    job = background_queue.enqueue(
+        task_id=task.task_id, goal=task_request.goal, constraints=constraints,
+        success_criteria=success_criteria, namespace=namespace, idempotency_key=task_key,
+    )
+    return {
+        "ok": True, "kind": "task", "task": task.to_dict(),
+        "task_access_token": _task_access_token(task.task_id),
+        "queue": job, "plan": [], "events": store.list_events(task.task_id),
+        "verification": {"status": "pending", "reason": "La tarea está guardada y pendiente de ejecución."},
+        "delivery_report": {
+            "status": "queued",
+            "execution": {"status": task.status.value, "complete": False, "event_count": 1, "failed_event_count": 0},
+            "warnings": [],
+        },
+        "execution_status": task.status.value,
+    }, 202
+
 
 @app.get("/")
 def home():
@@ -1197,52 +1261,54 @@ def execute_unified():
             }
         })
 
-    task_request = TaskRequest(
-        goal=goal,
+    # Preserve the established synchronous API contract for existing clients.
+    # The first-party UI opts into durable background execution with {"async": true};
+    # new integrations should prefer this mode for long-running goals.
+    if payload.get("async") is not True:
+        task_request = TaskRequest(
+            goal=goal,
+            constraints=["No afirmar uso de herramientas, proveedores o fuentes que no se hayan utilizado."],
+            success_criteria=[CRITERION],
+        )
+        try:
+            result = loop.run(task_request, namespace="prototype")
+        except Exception as exc:
+            return _api_failure(
+                "No se pudo completar la ejecución de la tarea.",
+                code="internal_execution_error", stage="execution",
+                retryable=False, status=500, route=route, exception=exc,
+            )
+        task = result.task
+        plan = [{"step_id": step.step_id, "name": step.name, "handler_key": step.handler_key}
+                for step in result.plan.steps] if result.plan else []
+        events = loop.executor.engine.store.list_events(task.task_id)
+        verification = result.verification or {"status": task.status.value}
+        delivery_report = build_delivery_report(
+            task_status=task.status.value, plan=plan, events=events,
+            artifacts=task.artifacts, verification=verification,
+        )
+        return jsonify({
+            "ok": task.status.value == "succeeded", "kind": "task",
+            "task_access_token": _task_access_token(task.task_id),
+            "route": route,
+            "route_reason": route_reason if route_source == "model" else "Plan persistido ejecutado mediante CognitiveLoop y TaskExecutor; ruta seleccionada por reglas.",
+            "route_source": route_source if route_source == "model" else "canonical_cognitive_loop",
+            "task": task.to_dict(), "plan": plan, "events": events,
+            "verification": verification, "delivery_report": delivery_report,
+            "execution_status": task.status.value, "plan_review": result.plan_review,
+            "runtime": {"steps_planned": len(plan), "steps_completed": sum(e["event_type"] == "step_succeeded" for e in events)},
+        }), 201
+
+    queued_body, queued_status = _enqueue_task(
+        goal,
         constraints=["No afirmar uso de herramientas, proveedores o fuentes que no se hayan utilizado."],
         success_criteria=[CRITERION],
+        namespace="prototype",
     )
-    try:
-        result = loop.run(task_request, namespace="prototype")
-    except Exception as exc:
-        return _api_failure(
-            "No se pudo completar la ejecución de la tarea.",
-            code="internal_execution_error",
-            stage="execution",
-            retryable=False,
-            status=500,
-            route=route,
-            exception=exc,
-        )
-    task = result.task
-    plan = [{"step_id": step.step_id, "name": step.name, "handler_key": step.handler_key}
-            for step in result.plan.steps] if result.plan else []
-    events = loop.executor.engine.store.list_events(task.task_id)
-    verification = result.verification or {"status": task.status.value}
-    delivery_report = build_delivery_report(
-        task_status=task.status.value,
-        plan=plan,
-        events=events,
-        artifacts=task.artifacts,
-        verification=verification,
-    )
-    body = {
-        "ok": task.status.value == "succeeded",
-        "kind": "task",
-        "task_access_token": _task_access_token(task.task_id),
-        "route": route,
-        "route_reason": route_reason if route_source == "model" else "Plan persistido ejecutado mediante CognitiveLoop y TaskExecutor; ruta seleccionada por reglas.",
-        "route_source": route_source if route_source == "model" else "canonical_cognitive_loop",
-        "task": task.to_dict(),
-        "plan": plan,
-        "events": events,
-        "verification": verification,
-        "delivery_report": delivery_report,
-        "execution_status": task.status.value,
-        "plan_review": result.plan_review,
-        "runtime": {"steps_planned": len(plan), "steps_completed": sum(e["event_type"] == "step_succeeded" for e in events)},
-    }
-    return jsonify(body), 201
+    queued_body["route"] = route
+    queued_body["route_reason"] = route_reason if route_source == "model" else "Tarea persistida y enviada a un worker; la ruta se seleccionó mediante reglas."
+    queued_body["route_source"] = route_source if route_source == "model" else "durable_task_queue"
+    return jsonify(queued_body), queued_status
 
 @app.post("/api/chat")
 def direct_chat():
@@ -1278,14 +1344,13 @@ def create_task():
         return jsonify({"error": "Escribe un objetivo no vacío."}), 400
     if len(goal) > 10000:
         return jsonify({"error": "El objetivo supera el límite de 10.000 caracteres."}), 400
-    task_request = TaskRequest(goal=goal.strip(), constraints=["No afirmar que se han usado modelos o fuentes que no están configurados."], success_criteria=[CRITERION])
-    result = loop.run(task_request, namespace="prototype")
-    task = result.task
-    plan = [{"step_id": s.step_id, "name": s.name, "handler_key": s.handler_key} for s in result.plan.steps] if result.plan else []
-    events = loop.executor.engine.store.list_events(task.task_id)
-    verification = result.verification or {"status": task.status.value}
-    delivery_report = build_delivery_report(task_status=task.status.value, plan=plan, events=events, artifacts=task.artifacts, verification=verification)
-    return jsonify({"task": task.to_dict(), "task_access_token": _task_access_token(task.task_id), "plan": plan, "events": events, "verification": verification, "plan_review": result.plan_review, "delivery_report": delivery_report}), 201
+    body, status = _enqueue_task(
+        goal.strip(),
+        constraints=["No afirmar que se han usado modelos o fuentes que no están configurados."],
+        success_criteria=[CRITERION],
+        namespace="prototype",
+    )
+    return jsonify(body), status
 
 @app.get("/api/tasks/<task_id>")
 def get_task(task_id):
@@ -1296,7 +1361,25 @@ def get_task(task_id):
         events = store.list_events(task_id)
     except (KeyError, ValueError):
         return jsonify({"error": "Tarea no encontrada."}), 404
-    return jsonify({"task": task.to_dict(), "events": events})
+    state = task.metadata.get(CognitiveLoop.PLAN_METADATA_KEY, {})
+    saved_plan = state.get("plan", {}) if isinstance(state, dict) else {}
+    raw_steps = saved_plan.get("steps", []) if isinstance(saved_plan, dict) else []
+    plan = [{"step_id": s.get("step_id"), "name": s.get("name"), "handler_key": s.get("handler_key")}
+            for s in raw_steps if isinstance(s, dict)]
+    verification = next((e["payload"] for e in reversed(events)
+                         if e["event_type"] in {"independent_verification", "executor_verification_result"}), None)
+    verification = verification or {"status": task.status.value, "reason": "Estado de verificación recuperado del historial persistido."}
+    delivery_report = build_delivery_report(
+        task_status=task.status.value, plan=plan, events=events,
+        artifacts=task.artifacts, verification=verification,
+    )
+    queue_job = background_queue.get(task_id)
+    return jsonify({
+        "task": task.to_dict(), "events": events, "plan": plan,
+        "verification": verification, "plan_review": state.get("plan_review") if isinstance(state, dict) else None,
+        "delivery_report": delivery_report, "queue": queue_job,
+        "runtime": {"steps_planned": len(plan), "steps_completed": sum(e["event_type"] == "step_succeeded" for e in events)},
+    })
 
 @app.get("/api/tasks/<task_id>/artifacts/<path:name>")
 def get_artifact(task_id, name):

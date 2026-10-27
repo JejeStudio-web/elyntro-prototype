@@ -67,6 +67,19 @@ mkdir -p /var/data
 
 Do not point SQLite to `/tmp` in a containerized deployment unless the target is backed by a real persistent volume. `/tmp` is suitable only for ephemeral local experiments; it is not durable across restarts.
 
+## Durable background task execution
+
+The first-party web UI opts into asynchronous task execution by sending `async: true` to `/api/agent/execute`. The API returns a task ID and task-access token; the browser polls `GET /api/tasks/<task_id>` for queue state, step events, artifacts and verification details. `POST /api/tasks` also enqueues work. Existing callers of `/api/execute` and `/api/agent/execute` retain the synchronous response contract unless they explicitly request async mode.
+
+Queue records, leases and task step results are stored in SQLite. The worker starts with the Flask app, claims jobs atomically, renews leases, and attempts bounded recovery after an expired lease. A persisted RUNNING or VERIFYING task resumes from committed step results. If interruption happens before a complete plan is saved, Elyntro fails closed rather than guessing how to continue.
+
+Configuration:
+- `ELYNTRO_TASK_LEASE_SECONDS`: worker lease duration; default 180 seconds, minimum 30.
+- `ELYNTRO_TASK_MAX_RECOVERIES`: maximum claims/recoveries before the queue marks a job failed; default 5.
+- `ELYNTRO_DB_PATH`: SQLite database path. The database must live on a persistent filesystem for queue and task state to survive deploys/replacements.
+
+Recovery is **at-least-once**, not exactly-once: a process can stop after an external side effect but before committing its step result. Handlers that mutate external state must be idempotent or use the engine's `OperationJournal`; ambiguous journal outcomes require reconciliation rather than blind replay. The queue does not provide process isolation or forcibly terminate a stuck Python handler. A persistent disk is required on Render; the current blueprint does not provision one automatically.
+
 ## Run locally
 
 ```bash

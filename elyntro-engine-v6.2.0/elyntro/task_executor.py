@@ -263,9 +263,10 @@ class TaskExecutor:
                 "fingerprint": fingerprint, "step_count": len(steps),
                 "step_ids": [step.step_id for step in steps],
             })
-        is_resume = task.status == TaskStatus.RUNNING
+        is_resume = task.status in {TaskStatus.RUNNING, TaskStatus.VERIFYING}
+        is_verifying_resume = task.status == TaskStatus.VERIFYING
         is_approved_ready = task.status == TaskStatus.READY
-        if task.status not in {TaskStatus.CREATED, TaskStatus.RUNNING, TaskStatus.READY}:
+        if task.status not in {TaskStatus.CREATED, TaskStatus.RUNNING, TaskStatus.READY, TaskStatus.VERIFYING}:
             raise ValueError(f"executor requires a created, approved-ready, or interrupted running task; current status is {task.status.value}")
         token = cancellation_token or CancellationToken()
         try:
@@ -283,7 +284,8 @@ class TaskExecutor:
             else:
                 if task.plan != [step.name for step in steps]:
                     raise ValueError("resume plan does not match the persisted task plan")
-                self.engine.store.add_event(task_id, "execution_resumed", {"step_count": len(steps)})
+                self.engine.store.add_event(task_id, "verification_resumed" if is_verifying_resume else "execution_resumed",
+                                            {"step_count": len(steps), "phase": "verification" if is_verifying_resume else "execution"})
 
             events = self.engine.store.list_events(task_id)
             committed: dict[str, dict[str, Any]] = {}
@@ -424,7 +426,8 @@ class TaskExecutor:
             if token.is_cancelled:
                 self.engine.cancel(task_id, "cancellation requested before verification")
                 return self.engine.store.get_task(task_id)
-            self.engine.transition(task_id, TaskStatus.VERIFYING, "all plan steps executed")
+            if not is_verifying_resume:
+                self.engine.transition(task_id, TaskStatus.VERIFYING, "all plan steps executed")
             unique_evidence: list[dict[str, Any]] = []
             seen: set[str] = set()
             for item in collected_evidence:
