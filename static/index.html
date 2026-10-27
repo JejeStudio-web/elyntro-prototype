@@ -235,6 +235,23 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
     }
+    /* Compact response workspace */
+    .topbar { align-items:flex-start; flex-wrap:wrap; padding:12px clamp(14px,2.5vw,30px); gap:10px; }
+    .topbar > .section-title { flex:1 1 180px; padding-top:7px; } .topbar .connection { flex:1 1 220px; justify-content:flex-start; }
+    .topbar .utility-button { flex:0 0 auto; padding:8px 11px; min-height:36px; white-space:nowrap; }
+    .workspace { width:min(1040px,100%); padding:clamp(18px,3vh,32px) clamp(14px,3vw,32px) 20px; } .intro { margin-bottom:18px; text-align:left; }
+    .intro h1 { font-size:clamp(27px,3.6vw,39px); letter-spacing:-1.25px; margin:8px 0; } .intro p { margin:0; max-width:760px; }
+    .suggestions { margin:16px 0 22px; gap:9px; } .suggestion { min-height:76px; padding:13px 14px; }
+    .conversation { width:min(920px,100%); gap:14px; margin-bottom:18px; } .message { padding:clamp(15px,2vw,22px); border-radius:17px; box-shadow:0 5px 22px #05081412; }
+    .message.user { width:min(88%,760px); background:linear-gradient(135deg,#222b47,#1b2438); } .message.assistant { border-color:#343e55; background:linear-gradient(145deg,#1a2231,#151c29); }
+    .message-head { align-items:center; margin-bottom:13px; letter-spacing:.7px; font-size:10px; } .message-head span:first-child { color:var(--text); } .message-head span:last-child { font-weight:550; letter-spacing:.2px; text-transform:none; }
+    .message-body { max-width:78ch; font-size:15px; line-height:1.8; color:#e5eaf5; } .message-body h1,.message-body h2,.message-body h3 { color:#f5f6ff; }
+    .message-body h1 { font-size:26px; } .message-body h2 { font-size:21px; padding-bottom:5px; border-bottom:1px solid #ffffff12; } .message-body h3 { font-size:16px; } .message-body p { margin-bottom:13px; }
+    .message-body li { margin:7px 0; padding-left:4px; } .message-body li::marker { color:var(--accent); } .message-body pre { max-width:100%; border-color:#3a455e; background:#0c111d; }
+    .message-tools { justify-content:flex-start; } .composer-wrap { width:min(920px,100%); margin:0 auto; } .composer { border-radius:18px; box-shadow:0 12px 38px #0306112b; } .composer textarea { min-height:92px; }
+    .response-meta { margin-top:16px; border:1px solid var(--line); border-radius:11px; color:var(--muted); font-size:12px; } .response-meta summary { cursor:pointer; padding:10px 12px; } .response-meta > div { padding:0 12px 10px; }
+    body.light .message.assistant { background:#fff; } body.light .message-body { color:#252b3a; } body.light .message-body h1,body.light .message-body h2,body.light .message-body h3 { color:#171d2b; } body.light .message.user { background:#e9edff; }
+    @media (max-width:760px) { .topbar { padding:10px 12px; } .topbar .connection { order:3; flex-basis:100%; } .workspace { padding:20px 12px 16px; } .suggestions { grid-template-columns:1fr; margin:13px 0 18px; } .suggestion { min-height:62px; } .message.user { width:96%; } .message-body { font-size:14px; } .composer textarea { min-height:76px; } }
   </style>
 </head>
 <body>
@@ -630,10 +647,14 @@
             }
             eventCard.append(list);
           }
-          const meta = addCard(pending.body, "Información de respuesta");
-          meta.append(element("p", "", `Ruta: ${data.route || "no indicada"} · ${data.route_source || "origen no indicado"}`));
-          meta.append(element("p", "", `Modelo devuelto por API: ${data.returned_model || "no indicado"}`));
-          meta.append(element("p", "", `Verificación: ${data.verification?.status || "no aplicable"}`));
+          const meta = element("details", "response-meta");
+          meta.append(element("summary", "", "Detalles técnicos y verificación"));
+          const metaBody = element("div");
+          metaBody.append(element("p", "", `Ruta: ${data.route || "no indicada"} · ${data.route_source || "origen no indicado"}`));
+          metaBody.append(element("p", "", `Modelo devuelto por API: ${data.returned_model || "no indicado"}`));
+          metaBody.append(element("p", "", `Verificación: ${data.verification?.status || "no aplicable"}`));
+          meta.append(metaBody);
+          pending.body.append(meta);
           $("status").textContent = "Respuesta recibida; no equivale a verificación factual independiente.";
           history.push({ role: "assistant", content: data.answer || "" });
           addResponseActions(pending.article, prompt, data.answer || "");
