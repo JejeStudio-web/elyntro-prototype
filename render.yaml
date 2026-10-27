@@ -3,9 +3,23 @@ services:
     name: elyntro-prototype
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.lock
-    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    buildCommand: pip install -r requirements.txt
+    startCommand: PYTHONPATH=elyntro-engine-v6.2.0 gunicorn --bind 0.0.0.0:$PORT app:app
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: 3.14.2
+      - key: ELYNTRO_DATABASE_URL
+        sync: false
+      - key: ELYNTRO_REGISTRATION_ENABLED
+        value: "false"
+      - key: ELYNTRO_COOKIE_SECURE
+        value: "true"
+      - key: ELYNTRO_FOUNDER_TOKEN
+        sync: false
+      - key: ELYNTRO_API_KEY
+        sync: false
+      - key: COMFYUI_BASE_URL
+        sync: false
+      - key: ELYNTRO_PLAYWRIGHT_ENABLED
+        value: "false"
