@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
-from elyntro_api_v1 import api_v1
+from elyntro_api_v1 import api_v1, _model_pool
 from werkzeug.middleware.proxy_fix import ProxyFix
 from elyntro import CognitiveLoop, EvidenceVerifier
 from elyntro.contracts import TaskRequest
@@ -435,6 +435,21 @@ def classify_request(goal: str) -> str:
 
 def _model_provider_config():
     """Resolve the configured model backend without exposing credentials."""
+    # The same server-side model pool powers both the public v1 gateway and
+    # Elyntro's first-party UI/runtime. Browser clients never receive provider keys.
+    pool = _model_pool()
+    if pool and os.environ.get("ELYNTRO_MODEL_POOL", "").strip():
+        selected = next((item for item in pool if item.get("primary")), pool[0])
+        return {
+            "provider": selected["provider"],
+            "base_url": selected["base_url"].rstrip("/"),
+            "api_key_env": selected.get("key_env", ""),
+            "api_key": selected.get("api_key", ""),
+            "model": selected["model"],
+            "model_alias": selected["id"],
+            "configured": True,
+            "error": None,
+        }
     provider = os.environ.get("ELYNTRO_MODEL_PROVIDER", "groq").strip().casefold()
     configs = {
         "groq": {
