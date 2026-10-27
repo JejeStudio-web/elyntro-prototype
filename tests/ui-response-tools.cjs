@@ -1,8 +1,9 @@
-const { chromium } = require("playwright");
+const { chromium, webkit } = require("playwright");
 const assert = require("node:assert/strict");
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
+  const engine = process.env.PLAYWRIGHT_BROWSER === "webkit" ? webkit : chromium;
+  const browser = await engine.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 820, height: 1180 },
     screen: { width: 820, height: 1180 },
@@ -74,8 +75,10 @@ const assert = require("node:assert/strict");
     await page.locator("#voice-input").click();
     assert.match(await page.locator("#status").textContent(), /dictado compatible/i, "fallback de voz cuando SpeechRecognition no existe");
 
+    const themeBefore = await page.locator("body").evaluate(el => el.classList.contains("light"));
     await page.locator("#theme-toggle").click();
-    assert.ok(await page.locator("body").evaluate(el => el.classList.contains("light") || !el.classList.contains("light")), "cambio de tema ejecutado");
+    const themeAfter = await page.locator("body").evaluate(el => el.classList.contains("light"));
+    assert.notEqual(themeAfter, themeBefore, "el control debe alternar el tema");
     assert.ok(await page.evaluate(() => localStorage.getItem("elyntro.theme.v1") !== null), "el tema se guarda localmente");
 
     const width = await page.evaluate(() => ({ viewport: window.innerWidth, page: document.documentElement.scrollWidth }));
@@ -91,7 +94,7 @@ const assert = require("node:assert/strict");
     assert.deepEqual(errors, [], "sin errores JavaScript no capturados");
     assert.ok(apiCalls.length >= 8, "las acciones deben conectar con la API del servidor");
     process.stdout.write(JSON.stringify({
-      ok: true, viewport: "820x1180, touch-enabled, DPR 2 (iPad-like)",
+      ok: true, browser: process.env.PLAYWRIGHT_BROWSER || "chromium", viewport: "820x1180, touch-enabled, DPR 2 (iPad-like)",
       assertions: ["markdown", "safe rendering", "answer actions", "follow-up", "search", "voice fallback", "theme persistence", "mobile overflow", "cancel request", "backend route"],
       apiRequests: apiCalls.length, consolePageErrors: errors,
     }, null, 2) + "\n");
