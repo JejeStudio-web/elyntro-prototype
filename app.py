@@ -1273,36 +1273,6 @@ def execute_unified():
     queued_body["route_source"] = route_source if route_source == "model" else "durable_task_queue"
     return jsonify(queued_body), queued_status
 
-    task = result.task
-    plan = [{"step_id": step.step_id, "name": step.name, "handler_key": step.handler_key}
-            for step in result.plan.steps] if result.plan else []
-    events = loop.executor.engine.store.list_events(task.task_id)
-    verification = result.verification or {"status": task.status.value}
-    delivery_report = build_delivery_report(
-        task_status=task.status.value,
-        plan=plan,
-        events=events,
-        artifacts=task.artifacts,
-        verification=verification,
-    )
-    body = {
-        "ok": task.status.value == "succeeded",
-        "kind": "task",
-        "task_access_token": _task_access_token(task.task_id),
-        "route": route,
-        "route_reason": route_reason if route_source == "model" else "Plan persistido ejecutado mediante CognitiveLoop y TaskExecutor; ruta seleccionada por reglas.",
-        "route_source": route_source if route_source == "model" else "canonical_cognitive_loop",
-        "task": task.to_dict(),
-        "plan": plan,
-        "events": events,
-        "verification": verification,
-        "delivery_report": delivery_report,
-        "execution_status": task.status.value,
-        "plan_review": result.plan_review,
-        "runtime": {"steps_planned": len(plan), "steps_completed": sum(e["event_type"] == "step_succeeded" for e in events)},
-    }
-    return jsonify(body), 201
-
 @app.post("/api/chat")
 def direct_chat():
     """Direct answer path: no planner, task executor, or artifact-verification step."""
