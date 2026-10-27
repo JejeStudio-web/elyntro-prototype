@@ -1344,8 +1344,8 @@ def multimodal_analyze():
             return jsonify({"ok": False, "error": "El total de adjuntos supera 650 KB. Reduce su tamaño."}), 413
         if mime in {"image/png", "image/jpeg", "image/webp"}:
             signatures = {
-                "image/png": raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n"),
-                "image/jpeg": raw.startswith(b"\\xff\\xd8\\xff"),
+                "image/png": raw.startswith(b"\x89PNG\r\n\x1a\n"),
+                "image/jpeg": raw.startswith(b"\xff\xd8\xff"),
                 "image/webp": len(raw) >= 12 and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP",
             }
             if not signatures[mime]:
