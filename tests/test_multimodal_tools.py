@@ -81,7 +81,7 @@ def test_v1_function_call_executes_only_allowlisted_calculator(api_client, monke
             return FakeResponse({"model": "test-model", "choices": [{
                 "message": {"role": "assistant", "content": None, "tool_calls": [{
                     "id": "call-1", "type": "function",
-                    "function": {"name": "calculate", "arguments": "{\\"expression\\":\\"2 + 2\\"}"},
+                    "function": {"name": "calculate", "arguments": '{"expression":"2 + 2"}'},
                 }]}, "finish_reason": "tool_calls",
             }]})
         assert calls[1]["messages"][-1]["role"] == "tool"
