@@ -338,6 +338,7 @@
     let account = null;
     let syncTimer = null;
     let syncInFlight = false;
+    let suppressAccountSync = false;
     const THEME_KEY = "elyntro.theme.v1";
     let busy = false;
     let attachedText = null;
@@ -813,7 +814,7 @@
       clearVisibleConversation();
       const active = conversations.find(item => item.id === activeConversationId);
       if (active) active.messages.slice(-40).forEach(item => { history.push({ role: item.role, content: item.content }); addMessage(item.role, "Historial sincronizado", item.content); });
-      persistConversations(false);
+      persistConversationsWithoutSync();
       renderConversationList();
     }
 
@@ -833,11 +834,16 @@
       }, 900);
     }
 
-    function persistConversations(shouldSync = true) {
+    function persistConversations() {
       try {
         localStorage.setItem(HISTORY_KEY, JSON.stringify(localConversationPayload()));
       } catch { $("status").textContent = "No se pudieron guardar las conversaciones en este navegador."; }
-      if (shouldSync) scheduleAccountSync();
+      if (account && !suppressAccountSync) scheduleAccountSync();
+    }
+
+    function persistConversationsWithoutSync() {
+      suppressAccountSync = true;
+      try { persistConversations(); } finally { suppressAccountSync = false; }
     }
 
     function saveHistory() {
