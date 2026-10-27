@@ -148,6 +148,26 @@
     .voice-button.listening { border-color: var(--danger); color: var(--danger); }
     body.light .message-body pre { background: #182033; }
     body.light .response-actions button, body.light .followup-chip { background: #ffffff; }
+    .workspace { width:min(1240px,100%); padding-top:clamp(20px,3vh,36px); }
+    .conversation { width:min(960px,100%); gap:22px; }
+    .message { padding:clamp(16px,2.2vw,26px); border-radius:20px; }
+    .message.user { width:min(78%,760px); }
+    .message.assistant { background:linear-gradient(145deg,#1a2232,#171d2b 65%); border-color:#39445d; }
+    .message-head { align-items:center; margin-bottom:14px; font-size:10px; letter-spacing:.09em; }
+    .message-body { font-size:15px; line-height:1.82; overflow-wrap:anywhere; }
+    .message-body p { margin:0 0 14px; }
+    .message-body h1 { font-size:clamp(25px,3vw,32px); margin-top:12px; }
+    .message-body h2 { font-size:clamp(20px,2.4vw,25px); padding-bottom:7px; border-bottom:1px solid #ffffff14; }
+    .message-body li { margin:7px 0; padding-left:5px; }
+    .message-body strong { color:#f5f6ff; font-weight:750; }
+    .message-body table { width:100%; border-collapse:collapse; margin:14px 0 18px; display:block; overflow-x:auto; }
+    .message-body th,.message-body td { border:1px solid var(--line); padding:9px 12px; text-align:left; vertical-align:top; }
+    .message-body th { background:#ffffff0a; font-weight:700; }
+    .message-tools { display:flex; justify-content:flex-end; margin-top:16px; padding-top:12px; border-top:1px solid #ffffff12; }
+    .copy-button { padding:7px 11px; border:1px solid var(--line); border-radius:9px; background:#ffffff06; color:var(--muted); font-size:11px; }
+    .composer-wrap { width:min(960px,100%); }
+    .composer { background:#1a2030f2; backdrop-filter:blur(16px); }
+    @media (max-width:760px) { .workspace{padding:20px 12px 12px}.message.user{width:92%}.message{padding:15px;border-radius:16px}.message-body{font-size:14px;line-height:1.75}.suggestions{grid-template-columns:1fr;gap:8px}.suggestion{min-height:auto}.topbar{padding:12px 14px;align-items:flex-start} }
 
     .composer-wrap { position: sticky; bottom: 0; width: min(880px, 100%); margin: 0 auto; padding: 12px 0 max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--bg) 17%); }
     .composer { padding: 10px; border: 1px solid #45506a; border-radius: 18px; background: #1a2030; box-shadow: 0 14px 45px #0005; }

@@ -21,17 +21,5 @@ services:
         sync: false
       - key: COMFYUI_BASE_URL
         sync: false
-      - key: COMFYUI_API_KEY
-        sync: false
-      - key: ELYNTRO_GITHUB_TOKEN
-        sync: false
-      - key: ELYNTRO_GITHUB_REPOSITORY
-        value: JejeStudio-web/elyntro-prototype
-      - key: ELYNTRO_SELFDEV_ENABLED
-        value: "false"
-      - key: ELYNTRO_BROWSER_WORKER_URL
-        sync: false
-      - key: ELYNTRO_BROWSER_WORKER_TOKEN
-        sync: false
       - key: ELYNTRO_PLAYWRIGHT_ENABLED
         value: "false"
