@@ -199,6 +199,20 @@
     .status-pill { display: inline-block; padding: 4px 8px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 10px; }
     .status-pill.success { border-color: #3d745f; color: var(--teal); }
     .status-pill.failed { border-color: #82545d; color: var(--danger); }
+    .delivery-report { display:grid; gap:10px; margin-top:14px; }
+    .delivery-summary { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .delivery-step { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:9px; padding:10px 0; border-top:1px solid #ffffff12; }
+    .delivery-step:first-child { border-top:0; }
+    .step-index { display:grid; place-items:center; width:24px; height:24px; border:1px solid var(--line); border-radius:8px; color:var(--muted); font-size:10px; }
+    .step-copy strong { display:block; font-size:12px; }
+    .step-copy p { margin:3px 0 0; color:var(--muted); font-size:11px; }
+    .check-list { display:grid; gap:6px; padding:0; margin:8px 0 0; list-style:none; }
+    .check-list li { display:flex; align-items:flex-start; gap:8px; margin:0; padding:8px 10px; border:1px solid var(--line); border-radius:9px; font-size:11px; }
+    .check-mark { flex:0 0 auto; font-weight:800; }
+    .check-mark.pass { color:var(--teal); }
+    .check-mark.fail { color:var(--danger); }
+    .delivery-warning { padding:9px 11px; border:1px solid #8b7548; border-radius:10px; color:#e8d3a2; background:#8b754814; font-size:11px; }
+    body.light .delivery-warning { color:#795c1f; background:#fff8e5; }
     .mobile-brand { display: none; }
     .top-actions { display: flex; align-items: center; gap: 8px; }
     .utility-button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: #ffffff08; color: var(--text); font-size: 11px; }
@@ -528,18 +542,81 @@
     function renderTask(parent, data) {
       const task = data.task || {};
       const status = task.status || data.execution_status || "desconocido";
+      const report = data.delivery_report || {};
       const statusPill = element("span", `status-pill ${status === "succeeded" ? "success" : status === "failed" ? "failed" : ""}`, status);
-      const overview = addCard(parent, "Estado de ejecución");
-      overview.append(statusPill);
+      const overview = addCard(parent, "Resumen de ejecución");
+      const summary = element("div", "delivery-summary");
+      summary.append(statusPill);
+      if (report.status) summary.append(element("span", `status-pill ${report.status === "completed_with_checks" ? "success" : report.status === "incomplete" ? "failed" : ""}`, report.status.replaceAll("_", " ")));
+      overview.append(summary);
       if (task.task_id) overview.append(element("p", "artifact-meta", `Tarea ${task.task_id}`));
+      const runtime = data.runtime || {};
+      if (runtime.steps_planned !== undefined) {
+        overview.append(element("p", "", `${runtime.steps_completed ?? 0} de ${runtime.steps_planned ?? 0} pasos completados`));
+      }
+
       const steps = Array.isArray(data.plan) ? data.plan : [];
-      if (steps.length) overview.append(element("p", "", `Plan: ${steps.map((step) => step.handler_key || step.name).join(" → ")}`));
-      const runtime = data.runtime;
-      if (runtime) overview.append(element("p", "artifact-meta", `${runtime.steps_completed ?? 0} de ${runtime.steps_planned ?? 0} pasos completados`));
+      if (steps.length) {
+        const planCard = addCard(parent, `Plan de ejecución · ${steps.length} pasos`);
+        const list = element("div", "delivery-report");
+        const events = Array.isArray(data.events) ? data.events : [];
+        for (const [index, step] of steps.entries()) {
+          const key = step.handler_key || step.name || `paso-${index + 1}`;
+          const related = events.filter((event) => {
+            const payload = event?.payload && typeof event.payload === "object" ? event.payload : {};
+            return payload.handler_key === key || payload.step_id === step.step_id;
+          });
+          const failed = related.some((event) => ["step_failed", "step_rejected"].includes(event.event_type));
+          const completed = related.some((event) => event.event_type === "step_succeeded");
+          const row = element("div", "delivery-step");
+          row.append(element("span", "step-index", String(index + 1)));
+          const copy = element("div", "step-copy");
+          copy.append(element("strong", "", step.name || key));
+          copy.append(element("p", "", step.handler_key ? `Ejecutor: ${step.handler_key}` : "Ejecutor no indicado"));
+          row.append(copy);
+          row.append(element("span", `status-pill ${failed ? "failed" : completed ? "success" : ""}`, failed ? "Falló" : completed ? "Completado" : "Sin evento"));
+          list.append(row);
+        }
+        planCard.append(list);
+      }
+
+      if (report.plan_review) {
+        const review = addCard(parent, "Revisión del plan");
+        review.append(element("p", "", `Estado: ${report.plan_review.status || "no indicado"}`));
+        for (const check of report.plan_review.checks || []) {
+          const row = element("li");
+          row.append(element("span", `check-mark ${check.passed ? "pass" : "fail"}`, check.passed ? "✓" : "×"));
+          row.append(document.createTextNode(`${check.name}: ${check.passed ? "correcto" : "requiere revisión"}`));
+          const list = review.querySelector("ul") || element("ul", "check-list");
+          if (!list.isConnected) review.append(list);
+          list.append(row);
+        }
+        for (const issue of report.plan_review.issues || []) review.append(element("p", "delivery-warning", issue));
+      }
+
+      if (report.artifacts?.length) {
+        const checksCard = addCard(parent, "Comprobaciones de archivos");
+        for (const artifact of report.artifacts) {
+          const row = element("div", "artifact-row");
+          const info = element("div");
+          info.append(element("strong", "", artifact.name || "artefacto"));
+          info.append(element("div", "artifact-meta", artifact.status || "sin estado"));
+          const checks = (artifact.checks || []).map((check) => `${check.passed ? "✓" : "×"} ${check.name}`).join(" · ");
+          if (checks) info.append(element("p", "artifact-meta", checks));
+          row.append(info);
+          checksCard.append(row);
+          if (artifact.scope) checksCard.append(element("p", "artifact-meta", artifact.scope));
+        }
+      }
+
+      if (Array.isArray(report.warnings) && report.warnings.length) {
+        const warnings = addCard(parent, "Pendiente de resolver");
+        for (const warning of report.warnings) warnings.append(element("p", "delivery-warning", warning));
+      }
 
       const events = Array.isArray(data.events) ? data.events : [];
       if (events.length) {
-        const eventCard = addCard(parent, `Registro de pasos · ${events.length}`);
+        const eventCard = addCard(parent, `Registro de ejecución · ${events.length} eventos`);
         const list = element("ul");
         for (const event of events) {
           const type = event.event_type || event.type || "evento";
@@ -551,10 +628,12 @@
       }
       addSources(parent, taskSources(task));
       addArtifacts(parent, task.artifacts);
-      if (data.verification) {
-        const verification = addCard(parent, "Verificación");
-        verification.append(element("p", "", `Estado: ${data.verification.status || "no indicado"}`));
-        if (data.verification.reason) verification.append(element("p", "artifact-meta", data.verification.reason));
+      const verificationData = report.evidence_review || data.verification;
+      if (verificationData) {
+        const verification = addCard(parent, "Alcance de la verificación");
+        verification.append(element("p", "", `Estado: ${verificationData.status || "no indicado"}`));
+        if (verificationData.reason) verification.append(element("p", "artifact-meta", verificationData.reason));
+        if (verificationData.note) verification.append(element("p", "artifact-meta", verificationData.note));
       }
     }
 
