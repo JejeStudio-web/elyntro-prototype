@@ -273,13 +273,12 @@ def chat_completions():
     stream_requested = payload.get("stream", False)
     if not isinstance(stream_requested, bool):
         return _error("stream debe ser booleano.", 400, "invalid_stream")
-    if payload.get("tools") or payload.get("functions"):
-        return _error("Las llamadas a herramientas no forman parte de este endpoint todavía.", 400, "tools_not_supported")
     messages = payload.get("messages")
     if not isinstance(messages, list) or not messages or len(messages) > MAX_MESSAGES:
         return _error(f"messages debe contener entre 1 y {MAX_MESSAGES} mensajes.", 400, "invalid_messages")
     clean_messages = []
     total_chars = 0
+    has_images = False
     for item in messages:
         if not isinstance(item, dict) or item.get("role") not in {"system", "user", "assistant"}:
             return _error("Cada mensaje debe tener role system, user o assistant.", 400, "invalid_message")
@@ -303,8 +302,14 @@ def chat_completions():
                     image_url = image.get("url")
                     if not isinstance(image_url, str) or not re.fullmatch(r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}", image_url):
                         return _error("Las imágenes deben ser data URL base64 PNG, JPEG o WebP; no se admiten URLs remotas.", 400, "invalid_image")
+                    try:
+                        if len(__import__("base64").b64decode(image_url.split(",", 1)[1], validate=True)) > 650_000:
+                            return _error("Cada imagen debe ocupar como máximo 650 KB.", 413, "image_too_large")
+                    except (ValueError, __import__("binascii").Error):
+                        return _error("La imagen no contiene base64 válido.", 400, "invalid_image")
                     if image.get("detail", "auto") not in {"auto", "low", "high"}:
                         return _error("Nivel de detalle de imagen no válido.", 400, "invalid_image")
+                    has_images = True
         else:
             return _error("content debe ser texto o una lista de partes de texto/imagen en un mensaje user.", 400, "invalid_message")
         if total_chars > MAX_CONTENT_CHARS:
@@ -326,72 +331,122 @@ def chat_completions():
     except (TypeError, ValueError):
         return _error("temperature debe ser un número entre 0 y 2.", 400, "invalid_temperature")
     if not 0 <= temperature <= 2:
-        return _error("temperature debe estar entre 0 y 2.", 400, "invalid_temperature")
-    body = {"model": config["model"], "messages": clean_messages,
-            "max_tokens": max_tokens, "temperature": temperature}
+        return _error("temperature debe ser un número entre 0 y 2.", 400, "invalid_temperature")
     response_format = payload.get("response_format")
     if response_format is not None:
         if not isinstance(response_format, dict) or response_format.get("type") not in {"text", "json_object"}:
             return _error("response_format admite text o json_object.", 400, "invalid_response_format")
-        if response_format.get("type") == "json_object":
-            body["response_format"] = {"type": "json_object"}
+    tool_schemas = []
+    tool_names = set()
+    supplied_tools = payload.get("tools", [])
+    if supplied_tools:
+        if stream_requested:
+            return _error("El streaming con ejecución de herramientas aún no está habilitado; usa stream=false.", 400, "stream_tools_not_supported")
+        if not isinstance(supplied_tools, list) or len(supplied_tools) > len(_PUBLIC_TOOL_SCHEMAS):
+            return _error("tools debe ser una lista de hasta tres herramientas permitidas.", 400, "invalid_tools")
+        schema_by_name = {item["function"]["name"]: item for item in _PUBLIC_TOOL_SCHEMAS}
+        for tool in supplied_tools:
+            if not isinstance(tool, dict) or tool.get("type") != "function" or not isinstance(tool.get("function"), dict):
+                return _error("Cada herramienta debe usar type=function.", 400, "invalid_tool")
+            name = tool["function"].get("name")
+            if name not in schema_by_name or name in tool_names:
+                return _error("Herramienta no permitida o duplicada. Permitidas: calculate, web_search, web_open.", 400, "tool_not_allowed")
+            tool_names.add(name)
+            tool_schemas.append(schema_by_name[name])
+    tool_choice = payload.get("tool_choice", "auto")
+    if tool_choice not in {"auto", "none", "required"} and not (
+        isinstance(tool_choice, dict) and tool_choice.get("type") == "function"
+        and isinstance(tool_choice.get("function"), dict)
+        and tool_choice["function"].get("name") in tool_names
+    ):
+        return _error("tool_choice debe ser auto, none, required o una función permitida.", 400, "invalid_tool_choice")
+    if tool_choice == "required" and not tool_schemas:
+        return _error("tool_choice=required exige que se envíe al menos una herramienta.", 400, "invalid_tool_choice")
+    if isinstance(tool_choice, dict) and tool_choice.get("function", {}).get("name") not in tool_names:
+        return _error("tool_choice hace referencia a una herramienta no habilitada.", 400, "invalid_tool_choice")
+    body = {"model": config["model"], "messages": clean_messages,
+            "max_tokens": max_tokens, "temperature": temperature}
+    if response_format and response_format.get("type") == "json_object":
+        body["response_format"] = {"type": "json_object"}
     if stream_requested:
         return _stream_completion(config, body)
-    request_id = "chatcmpl-" + uuid.uuid4().hex
-    http_request = Request(
-        config["base_url"] + "/chat/completions",
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "Elyntro/1.0"},
-        method="POST",
-    )
-    if config["api_key"]:
-        http_request.add_unredirected_header("Authorization", "Bearer " + config["api_key"])
+    if tool_schemas:
+        body["tools"] = tool_schemas
+        body["tool_choice"] = tool_choice
     started = time.monotonic()
-    try:
-        with urlopen(http_request, timeout=45) as response:
-            raw = response.read(2_000_000)
-            data = json.loads(raw.decode("utf-8"))
-    except HTTPError as exc:
-        status = 429 if exc.code == 429 else (503 if exc.code >= 500 else 502)
-        return _error(f"El proveedor respondió HTTP {exc.code}.", status,
-                      "provider_rate_limited" if exc.code == 429 else "provider_error",
-                      retryable=(exc.code == 429 or exc.code >= 500))
-    except (URLError, TimeoutError):
-        return _error("No se pudo conectar con el proveedor o se agotó el tiempo de espera.", 502,
-                      "provider_connection_failed", retryable=True)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return _error("El proveedor devolvió una respuesta que no es JSON válido.", 502, "provider_invalid_response")
-    try:
-        choice = data["choices"][0]
-        answer = choice["message"]["content"]
-        finish_reason = choice.get("finish_reason") or "stop"
-    except (KeyError, IndexError, TypeError):
-        return _error("La respuesta del proveedor tiene una estructura inesperada.", 502, "provider_invalid_response")
-    if not isinstance(answer, str):
-        return _error("El proveedor devolvió contenido no textual, no soportado por esta API.", 502, "provider_invalid_response")
-    if not answer.strip():
-        return _error("El proveedor devolvió una respuesta vacía.", 502, "provider_empty_response", retryable=True)
-    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-
-    def _safe_usage_int(value):
-        # Provider usage metadata is untrusted input; keep the public schema numeric.
-        if isinstance(value, bool):
-            return 0
+    tool_events = []
+    max_rounds = 4
+    for round_index in range(max_rounds + 1):
+        http_request = Request(config["base_url"] + "/chat/completions",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "Elyntro/1.2"}, method="POST")
+        if config["api_key"]:
+            http_request.add_unredirected_header("Authorization", "Bearer " + config["api_key"])
         try:
-            parsed = int(value)
-        except (TypeError, ValueError, OverflowError):
-            return 0
-        return max(0, min(parsed, 2**31 - 1))
-
-    returned_model = data.get("model") if isinstance(data.get("model"), str) and data.get("model").strip() else config["model"]
-    return jsonify({
-        "id": request_id, "object": "chat.completion", "created": int(time.time()),
-        "model": config["id"],
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": answer},
-                     "finish_reason": finish_reason}],
-        "usage": {"prompt_tokens": _safe_usage_int(usage.get("prompt_tokens", 0)),
-                  "completion_tokens": _safe_usage_int(usage.get("completion_tokens", 0)),
-                  "total_tokens": _safe_usage_int(usage.get("total_tokens", 0))},
-        "elyntro": {"provider": config["provider"], "upstream_model": returned_model, "latency_ms": int((time.monotonic() - started) * 1000),
-                    "streaming": False, "multimodal": False}
-    })
+            with urlopen(http_request, timeout=60) as upstream:
+                data = json.loads(upstream.read(2_000_000).decode("utf-8"))
+        except HTTPError as exc:
+            status = 429 if exc.code == 429 else (503 if exc.code >= 500 else 502)
+            return _error(f"El proveedor respondió HTTP {exc.code}.", status,
+                           "provider_rate_limited" if exc.code == 429 else "provider_error",
+                           retryable=(exc.code == 429 or exc.code >= 500))
+        except (URLError, TimeoutError, OSError):
+            return _error("No se pudo conectar con el proveedor o se agotó el tiempo de espera.", 502,
+                          "provider_connection_failed", retryable=True)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return _error("El proveedor devolvió una respuesta que no es JSON válido.", 502, "provider_invalid_response")
+        try:
+            choice = data["choices"][0]
+            message = choice["message"]
+            finish_reason = choice.get("finish_reason") or "stop"
+        except (KeyError, IndexError, TypeError):
+            return _error("La respuesta del proveedor tiene una estructura inesperada.", 502, "provider_invalid_response")
+        calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if not calls:
+            answer = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(answer, str) or not answer.strip():
+                return _error("El proveedor devolvió una respuesta vacía o no textual.", 502, "provider_empty_response", retryable=True)
+            usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+            def _safe_usage_int(value):
+                if isinstance(value, bool): return 0
+                try: parsed = int(value)
+                except (TypeError, ValueError, OverflowError): return 0
+                return max(0, min(parsed, 2**31 - 1))
+            returned_model = data.get("model") if isinstance(data.get("model"), str) and data.get("model").strip() else config["model"]
+            return jsonify({
+                "id": "chatcmpl-" + uuid.uuid4().hex, "object": "chat.completion", "created": int(time.time()),
+                "model": config["id"],
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": finish_reason}],
+                "usage": {"prompt_tokens": _safe_usage_int(usage.get("prompt_tokens", 0)),
+                          "completion_tokens": _safe_usage_int(usage.get("completion_tokens", 0)),
+                          "total_tokens": _safe_usage_int(usage.get("total_tokens", 0))},
+                "elyntro": {"provider": config["provider"], "upstream_model": returned_model,
+                            "latency_ms": int((time.monotonic() - started) * 1000),
+                            "streaming": False, "multimodal": has_images,
+                            "tool_events": tool_events, "tool_rounds": round_index}
+            })
+        if not tool_schemas:
+            return _error("El modelo intentó llamar herramientas, pero no se habilitó ninguna.", 502, "unexpected_tool_call")
+        if round_index >= max_rounds:
+            return _error("Se alcanzó el límite de rondas de herramientas sin respuesta final.", 502, "tool_round_limit")
+        if len(calls) > 3:
+            return _error("El modelo solicitó demasiadas herramientas en una sola ronda.", 502, "too_many_tool_calls")
+        body["messages"].append({"role": "assistant", "content": message.get("content"), "tool_calls": calls})
+        for call in calls:
+            try:
+                call_id = str(call["id"])
+                function = call["function"]
+                name = function["name"]
+                if name not in tool_names:
+                    raise ValueError("tool_not_allowed")
+                args = json.loads(function.get("arguments", "{}"))
+                result = _execute_public_tool(name, args)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                call_id = str(call.get("id", "invalid-call"))[:100] if isinstance(call, dict) else "invalid-call"
+                name = "invalid"
+                result = {"ok": False, "error": "La llamada de herramienta del modelo no cumplía el contrato permitido."}
+            safe_result = json.dumps(result, ensure_ascii=False)[:12000]
+            tool_events.append({"tool": name, "status": "completed" if result.get("ok") else "failed",
+                                "summary": str(result.get("error") or "Herramienta ejecutada.")[:240]})
+            body["messages"].append({"role": "tool", "tool_call_id": call_id, "content": safe_result})
+    return _error("No se obtuvo una respuesta final del proveedor.", 502, "tool_execution_failed")
