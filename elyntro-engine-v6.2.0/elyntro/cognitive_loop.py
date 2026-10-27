@@ -108,7 +108,7 @@ class CognitiveLoop:
         if any(e["event_type"] == "cognitive_loop_started" for e in existing_events):
             state = task.metadata.get(self.PLAN_METADATA_KEY, {})
             persisted_plan = state.get("plan") if isinstance(state, dict) else None
-            if task.status in {TaskStatus.RUNNING, TaskStatus.READY} and isinstance(persisted_plan, dict):
+            if task.status in {TaskStatus.RUNNING, TaskStatus.READY, TaskStatus.VERIFYING} and isinstance(persisted_plan, dict):
                 # The executor resumes from durable step_result_committed events.
                 # Completed steps are reused; only steps without a committed result run again.
                 plan = self._deserialize_plan(persisted_plan)
