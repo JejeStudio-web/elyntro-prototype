@@ -50,6 +50,27 @@ jobs:
           node --check /tmp/elyntro-studio.mjs
       - name: Run tests
         run: python -m pytest -q
+      - name: Install browser-test dependencies
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium webkit
+      - name: Start static UI server
+        run: |
+          python -m http.server 4173 --bind 127.0.0.1 >/tmp/elyntro-ui-server.log 2>&1 &
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:4173/static/index.html >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/elyntro-ui-server.log
+          exit 1
+      - name: Test response controls on Chromium mobile viewport
+        env:
+          PLAYWRIGHT_BROWSER: chromium
+        run: node tests/ui-response-tools.cjs
+      - name: Test response controls on WebKit mobile viewport
+        env:
+          PLAYWRIGHT_BROWSER: webkit
+        run: node tests/ui-response-tools.cjs
 
   build-browser-worker:
     needs: test
