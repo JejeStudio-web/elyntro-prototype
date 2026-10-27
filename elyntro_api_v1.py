@@ -49,6 +49,63 @@ def _config():
     }
 
 
+def _model_pool():
+    """Return configured model aliases from server-side environment only.
+
+    ELYNTRO_MODEL_POOL is a JSON array of entries with id, provider, model,
+    base_url, and api_key_env. Secrets are referenced by environment-variable
+    name and are never accepted from client requests.
+    """
+    raw = os.getenv("ELYNTRO_MODEL_POOL", "").strip()
+    if not raw:
+        config = _config()
+        return [{**config, "id": config.get("model"), "primary": True}] if config.get("supported") and config.get("configured") else []
+    try:
+        entries = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(entries, list):
+        return []
+    pool, seen = [], set()
+    for item in entries[:8]:
+        if not isinstance(item, dict):
+            continue
+        model_id = item.get("id")
+        provider = item.get("provider", "openai-compatible")
+        model = item.get("model")
+        base_url = item.get("base_url")
+        key_env = item.get("api_key_env", "")
+        if not all(isinstance(v, str) and v.strip() for v in (model_id, provider, model, base_url)):
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}", model_id) or model_id in seen:
+            continue
+        if not re.fullmatch(r"https://[^\\s]+|http://(?:127\\.0\\.0\\.1|localhost)(?::[0-9]+)?(?:/[^\\s]*)?", base_url):
+            continue
+        if key_env and not re.fullmatch(r"[A-Z][A-Z0-9_]{1,99}", key_env):
+            continue
+        api_key = os.getenv(key_env, "").strip() if key_env else ""
+        if key_env and not api_key:
+            continue
+        seen.add(model_id)
+        pool.append({"id": model_id, "provider": provider, "model": model,
+                     "base_url": base_url.rstrip("/"), "api_key": api_key,
+                     "key_env": key_env, "supported": True, "configured": True,
+                     "primary": bool(item.get("primary", False)),
+                     "capabilities": item.get("capabilities", {}) if isinstance(item.get("capabilities", {}), dict) else {}})
+    if pool and not any(item["primary"] for item in pool):
+        pool[0]["primary"] = True
+    return pool
+
+
+def _select_model(requested_model):
+    pool = _model_pool()
+    if not pool:
+        return None
+    if requested_model in (None, "elyntro-auto", "elyntro-default"):
+        return next((item for item in pool if item.get("primary")), pool[0])
+    return next((item for item in pool if requested_model in {item["id"], item["model"]}), None)
+
+
 def _authorized():
     expected = os.getenv("ELYNTRO_API_KEY", "").strip()
     if not expected:
@@ -127,15 +184,16 @@ def models():
     denied = _client_error()
     if denied:
         return denied
-    config = _config()
-    if not config["supported"]:
-        return _error("Proveedor no compatible. Usa groq, openai, ollama u openai-compatible.", 503, "provider_unsupported")
-    if not config["configured"]:
-        return _error("El proveedor no está configurado. Revisa la clave, el modelo y la URL base.", 503, "provider_not_configured")
+    pool = _model_pool()
+    if not pool:
+        return _error("No hay modelos configurados. Configura ELYNTRO_MODEL_POOL o el proveedor heredado.", 503, "provider_not_configured")
     return jsonify({"object": "list", "data": [{
-        "id": config["model"], "object": "model", "owned_by": config["provider"],
-        "capabilities": {"chat_completions": True, "streaming": True, "vision": "provider-dependent", "audio": False, "video": False}
-    }]})
+        "id": item["id"], "object": "model", "owned_by": item["provider"],
+        "capabilities": {"chat_completions": True, "streaming": True,
+                         "vision": item.get("capabilities", {}).get("vision", "provider-dependent"),
+                         "audio": False, "video": False},
+        "elyntro": {"provider": item["provider"], "upstream_model": item["model"], "primary": item["primary"]}
+    } for item in pool]})
 
 
 @api_v1.post("/chat/completions")
@@ -188,14 +246,11 @@ def chat_completions():
         if total_chars > MAX_CONTENT_CHARS:
             return _error("El texto total supera el límite de 12.000 caracteres.", 413, "content_too_large")
         clean_messages.append({"role": role, "content": value})
-    config = _config()
-    if not config["supported"]:
-        return _error("Proveedor no compatible. Usa groq, openai, ollama u openai-compatible.", 503, "provider_unsupported")
-    if not config["configured"]:
-        return _error("El proveedor no está configurado. Revisa la clave, el modelo y la URL base.", 503, "provider_not_configured")
     requested_model = payload.get("model")
-    if requested_model is not None and requested_model != config["model"]:
-        return _error("El modelo solicitado no coincide con el modelo configurado para esta instancia.", 400, "model_not_available")
+    config = _select_model(requested_model)
+    if config is None:
+        return _error("No hay un modelo configurado disponible para esa selección. Consulta GET /api/v1/models.", 400 if requested_model else 503,
+                      "model_not_available" if requested_model else "provider_not_configured")
     try:
         max_tokens = int(payload.get("max_tokens", 800))
     except (TypeError, ValueError):
@@ -267,12 +322,12 @@ def chat_completions():
     returned_model = data.get("model") if isinstance(data.get("model"), str) and data.get("model").strip() else config["model"]
     return jsonify({
         "id": request_id, "object": "chat.completion", "created": int(time.time()),
-        "model": returned_model,
+        "model": config["id"],
         "choices": [{"index": 0, "message": {"role": "assistant", "content": answer},
                      "finish_reason": finish_reason}],
         "usage": {"prompt_tokens": _safe_usage_int(usage.get("prompt_tokens", 0)),
                   "completion_tokens": _safe_usage_int(usage.get("completion_tokens", 0)),
                   "total_tokens": _safe_usage_int(usage.get("total_tokens", 0))},
-        "elyntro": {"provider": config["provider"], "latency_ms": int((time.monotonic() - started) * 1000),
+        "elyntro": {"provider": config["provider"], "upstream_model": returned_model, "latency_ms": int((time.monotonic() - started) * 1000),
                     "streaming": False, "multimodal": False}
     })
