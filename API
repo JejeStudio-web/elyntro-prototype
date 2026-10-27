@@ -1,0 +1,40 @@
+import os
+from google import genai
+
+# Configura tu clave de API (o establece la variable de entorno GEMINI_API_KEY)
+os.environ["GEMINI_API_KEY"] = "TU_API_KEY_DE_GEMINI"
+
+client = genai.Client()
+
+response = client.models.generate_content(
+    model='gemini-2.5-flash',
+    contents='¿Por qué el cielo es azul?',
+)
+
+print(response.text)
+
+
+import os
+from openai import OpenAI
+
+# Configura tu clave de API (o establece la variable de entorno PERPLEXITY_API_KEY)
+os.environ["PERPLEXITY_API_KEY"] = "TU_API_KEY_DE_PERPLEXITY"
+
+YOUR_API_KEY = os.environ.get("PERPLEXITY_API_KEY")
+import openai
+
+client = OpenAI(
+    api_key=YOUR_API_KEY, 
+    base_url="https://perplexity.ai"
+)
+
+# Puedes usar modelos como "sonar" o "sonar-reasoning"
+response = client.chat.completions.create(
+    model="sonar",
+    messages=[
+        {"role": "system", "content": "Sé conciso y preciso."},
+        {"role": "user", "content": "¿Cuáles son las últimas noticias sobre la fusión nuclear?"}
+    ]
+)
+
+print(response.choices[0].message.content)
