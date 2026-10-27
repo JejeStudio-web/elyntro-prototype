@@ -981,7 +981,7 @@
       if (!user || typeof user.user_id !== "string") throw new Error("El servidor no devolvió una identidad válida.");
       const previousOwner = (() => { try { return localStorage.getItem(LOCAL_OWNER_KEY); } catch { return null; } })();
       const hasLocal = conversations.some(item => item.messages && item.messages.length);
-      let importLocal = false;
+      let importLocal = previousOwner === user.user_id;
       if (previousOwner && previousOwner !== user.user_id) {
         try { localStorage.setItem(GUEST_BACKUP_KEY,localStorage.getItem(HISTORY_KEY)||""); localStorage.removeItem(HISTORY_KEY); localStorage.removeItem(LEGACY_HISTORY_KEY); } catch {}
         conversations.splice(0); history.splice(0); activeConversationId = null; restoreHistory();
