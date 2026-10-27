@@ -1430,6 +1430,8 @@ def multimodal_transcribe():
     field("model", transcription_model)
     field("response_format", "json")
     mime = uploaded.mimetype or "application/octet-stream"
+    if not re.fullmatch(r"[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+", mime):
+        mime = "application/octet-stream"
     chunks.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\nContent-Type: {mime}\r\n\r\n".encode() + raw + b"\r\n")
     chunks.append(f"--{boundary}--\r\n".encode())
     upstream = urllib.request.Request(config["base_url"] + "/audio/transcriptions", data=b"".join(chunks),
