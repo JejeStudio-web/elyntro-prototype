@@ -91,6 +91,8 @@ The first-party UI accepts up to five text files (8 KB combined) and up to five 
 
 The authenticated OpenAI-compatible `POST /api/v1/chat/completions` endpoint supports bounded function calling for the explicit allowlist `calculate`, `web_search`, and `web_open`. It executes at most four model/tool rounds, rejects other tool names, and does not support streaming and tool execution in the same request yet. Web search requires the configured search provider; web open is limited to public HTTP(S) URLs and blocks unsafe destinations. This is not arbitrary shell or unrestricted computer access.
 
+The first-party UI also exposes an optional **quick answer** mode using `POST /api/chat/stream` and Server-Sent Events (SSE). It streams text directly and explicitly does not execute tools or web research; automatic mode remains the default and keeps the planner/tool/task routing.
+
 Long-running work continues to use Elyntro's durable task queue and task status API. The model/tool loop, multimodal analysis, and media generation are distinct execution paths with different capabilities; a successful API response is not by itself independent factual verification. Provider-specific features must be tested against the exact configured model before being advertised as available.
 
 ## Run locally
