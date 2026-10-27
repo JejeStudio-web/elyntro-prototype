@@ -134,6 +134,11 @@ def _apply_api_limits():
 
     limits = {
         "/api/chat": int(os.environ.get("ELYNTRO_RATE_LIMIT_CHAT_PER_MINUTE", "20")),
+        "/api/multimodal/analyze": int(os.environ.get("ELYNTRO_RATE_LIMIT_MULTIMODAL_PER_MINUTE", "8")),
+        "/api/multimodal/transcribe": int(os.environ.get("ELYNTRO_RATE_LIMIT_TRANSCRIBE_PER_MINUTE", "5")),
+        "/api/media/generate-image": int(os.environ.get("ELYNTRO_RATE_LIMIT_MEDIA_PER_MINUTE", "5")),
+        "/api/media/generate-speech": int(os.environ.get("ELYNTRO_RATE_LIMIT_MEDIA_PER_MINUTE", "5")),
+        "/api/media/generate-video": int(os.environ.get("ELYNTRO_RATE_LIMIT_MEDIA_PER_MINUTE", "3")),
         "/api/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
         "/api/v1/agent/execute": int(os.environ.get("ELYNTRO_RATE_LIMIT_TASKS_PER_MINUTE", "10")),
@@ -1408,7 +1413,7 @@ def multimodal_transcribe():
     uploaded = request.files.get("file")
     if uploaded is None or not uploaded.filename:
         return jsonify({"ok": False, "error": "Adjunta un archivo de audio en el campo file."}), 400
-    name = os.path.basename(uploaded.filename)[:120]
+    name = re.sub(r"[^A-Za-z0-9_. -]", "_", os.path.basename(uploaded.filename))[:120]
     if not name.lower().endswith((".wav", ".mp3", ".m4a", ".mp4", ".mpeg", ".mpga", ".webm", ".ogg", ".flac")):
         return jsonify({"ok": False, "error": "Formato de audio no compatible."}), 415
     raw = uploaded.stream.read(850_001)
