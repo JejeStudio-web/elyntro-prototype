@@ -283,7 +283,8 @@ def test_render_config_does_not_extract_zips():
     from pathlib import Path
     rendered = Path('render.yaml').read_text(encoding='utf-8')
     assert 'ZipFile' not in rendered
-    assert 'pip install -r requirements.lock' in rendered
+    assert 'pip install -r requirements.txt' in rendered
+    assert 'PYTHONPATH=elyntro-engine-v6.2.0' in rendered
     assert 'gunicorn --bind 0.0.0.0:$PORT app:app' in rendered
 
 
