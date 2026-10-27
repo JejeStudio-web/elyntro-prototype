@@ -240,3 +240,43 @@ def test_first_party_runtime_uses_same_primary_model_pool(api_client, monkeypatc
     assert config["model"] == "gpt-4.1-mini"
     assert config["model_alias"] == "reasoner"
     assert config["api_key"] == "test-openai-key"
+
+
+def test_runtime_model_pool_fails_over_after_provider_error(monkeypatch):
+    import app as app_module
+    pool = [
+        {"id": "primary", "provider": "broken", "model": "bad-model", "primary": True, "configured": True},
+        {"id": "backup", "provider": "healthy", "model": "good-model", "primary": False, "configured": True},
+    ]
+    monkeypatch.setattr(app_module, "_model_pool", lambda: pool)
+    calls = []
+    def fake_call(config, messages, **kwargs):
+        calls.append(config["id"])
+        if config["id"] == "primary":
+            return {"text": None, "error": "provider down", "error_code": "provider_unavailable", "retryable": True, "provider": "broken"}
+        return {"text": "Respuesta completa con pasos y un ejemplo concreto para resolver la petición.", "provider": "healthy", "model": "good-model"}
+    monkeypatch.setattr(app_module, "_call_model_config", fake_call)
+    result = app_module._groq_messages([{"role": "user", "content": "explica cómo resolver el problema"}])
+    assert calls == ["primary", "backup"]
+    assert result["text"].startswith("Respuesta completa")
+    assert result["providers_failed_over"] == 1
+    assert result["selection"] == "only_successful_candidate"
+
+
+def test_runtime_compares_successful_model_answers_and_selects_scored_candidate(monkeypatch):
+    import app as app_module
+    pool = [
+        {"id": "primary", "provider": "p1", "model": "m1", "primary": True, "configured": True},
+        {"id": "backup", "provider": "p2", "model": "m2", "primary": False, "configured": True},
+    ]
+    monkeypatch.setattr(app_module, "_model_pool", lambda: pool)
+    def fake_call(config, messages, **kwargs):
+        if config["id"] == "primary":
+            return {"text": "No lo sé.", "provider": "p1", "model": "m1"}
+        return {"text": "## Solución paso a paso\\n1. Analiza el problema.\\n2. Aplica el método.\\nPor ejemplo, comprueba el resultado y explica por qué funciona.", "provider": "p2", "model": "m2"}
+    monkeypatch.setattr(app_module, "_call_model_config", fake_call)
+    result = app_module._groq_messages([{"role": "user", "content": "explica una solución con ejemplo y pasos"}])
+    assert result["model_alias"] == "backup"
+    assert result["selection"] == "heuristic_quality_comparison"
+    assert result["models_compared"] == 2
+    assert len(result["comparison"]["candidates"]) == 2
