@@ -1,0 +1,2 @@
+# Optional dependencies for isolated browser automation. Do not install on the public web service unless needed.
+playwright>=1.50,<2

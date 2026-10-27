@@ -1,0 +1,9 @@
+FROM mcr.microsoft.com/playwright/python:v1.64.0-noble
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /opt/elyntro-browser-worker
+COPY requirements-browser-worker.txt ./
+RUN python -m pip install --no-cache-dir -r requirements-browser-worker.txt && python -m playwright install --with-deps chromium
+COPY browser_worker.py ./
+RUN useradd --create-home --uid 10001 worker && chown -R worker:worker /opt/elyntro-browser-worker
+USER worker
+CMD ["sh","-c","gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 1 --threads 4 --timeout 30 browser_worker:app"]
