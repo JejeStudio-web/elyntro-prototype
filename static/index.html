@@ -1219,6 +1219,12 @@
       $("menu-toggle").setAttribute("aria-expanded", String(open));
       $("menu-toggle").setAttribute("aria-label", open ? "Cerrar navegación" : "Abrir navegación");
     });
+    document.addEventListener("click", (event) => {
+      if (document.body.classList.contains("sidebar-open") && event.target === document.body) {
+        document.body.classList.remove("sidebar-open");
+        $("menu-toggle")?.setAttribute("aria-expanded", "false");
+      }
+    });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         document.body.classList.remove("sidebar-open");
