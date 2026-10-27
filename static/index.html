@@ -251,6 +251,8 @@
           <button id="identity-logout" type="button" hidden>Cerrar sesión</button>
         </div>
         <p id="identity-status" role="status">Comprobando identidad compartida…</p>
+        <input id="founder-token" type="password" autocomplete="off" placeholder="Token de creador (opcional)" aria-label="Token de creador">
+        <p class="artifact-meta">Solo se envía con peticiones que empiezan por [245jg&amp;]. Se guarda en esta pestaña.</p>
       </section>
       <button class="new-task" id="new-task" type="button">＋ &nbsp; Nueva tarea</button>
       <div>
@@ -340,6 +342,13 @@
     let identityUser = null;
     const sharedVersions = new Map();
     let syncRunning = false;
+    const founderTokenInput = $("founder-token");
+    founderTokenInput.value = sessionStorage.getItem("elyntro_founder_token") || "";
+    founderTokenInput.addEventListener("input", () => {
+      const token = founderTokenInput.value.trim();
+      if (token) sessionStorage.setItem("elyntro_founder_token", token);
+      else sessionStorage.removeItem("elyntro_founder_token");
+    });
     const conversations = [];
     let activeConversationId = null;
     const THEME_KEY = "elyntro.theme.v1";
@@ -588,9 +597,15 @@
       activeController = controller;
       const timeout = window.setTimeout(() => controller.abort(), 120000);
       try {
+        const requestHeaders = { "Content-Type": "application/json" };
+        if (String(fullPrompt).startsWith("[245jg&]")) {
+          const creatorToken = sessionStorage.getItem("elyntro_founder_token") || "";
+          if (creatorToken) requestHeaders["X-Elyntro-Founder-Token"] = creatorToken;
+        }
         const response = await fetch("/api/agent/execute", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: requestHeaders,
+          credentials: "same-origin",
           body: JSON.stringify({ goal: fullPrompt, history: requestHistory }),
           signal: controller.signal,
         });

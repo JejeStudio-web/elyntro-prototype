@@ -408,3 +408,34 @@ def test_playwright_proxy_rejects_public_worker_hostname_before_sending_token(mo
         headers={"Authorization": "Bearer test-api-key"},
         json={"url": "https://example.com"})
     assert response.status_code == 503
+
+
+def test_comfyui_models_requires_authentication(monkeypatch):
+    import app as mod
+    monkeypatch.delenv("ELYNTRO_API_KEY", raising=False)
+    response = mod.app.test_client().get("/api/creative/comfyui/models")
+    assert response.status_code == 401
+
+
+def test_comfyui_models_uses_configured_bearer_key(monkeypatch):
+    import json
+    import app as mod
+    import creative_runtime
+    seen = {}
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, limit=-1): return json.dumps({"CheckpointLoaderSimple":{"input":{"required":{"ckpt_name":[["model-a.safetensors","model-b.safetensors"]]}}}}).encode()
+    def fake_urlopen(req, timeout=0):
+        seen["authorization"] = req.get_header("Authorization")
+        seen["url"] = req.full_url
+        return FakeResponse()
+    monkeypatch.setenv("ELYNTRO_API_KEY", "test-api-key")
+    monkeypatch.setenv("COMFYUI_BASE_URL", "https://comfy.example")
+    monkeypatch.setenv("COMFYUI_API_KEY", "comfy-secret")
+    monkeypatch.setattr(creative_runtime.urllib.request, "urlopen", fake_urlopen)
+    response = mod.app.test_client().get("/api/creative/comfyui/models", headers={"Authorization":"Bearer test-api-key"})
+    assert response.status_code == 200
+    assert response.get_json()["models"] == ["model-a.safetensors", "model-b.safetensors"]
+    assert seen["authorization"] == "Bearer comfy-secret"
+    assert seen["url"] == "https://comfy.example/object_info/CheckpointLoaderSimple"

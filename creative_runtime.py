@@ -26,6 +26,20 @@ MAX_BODY = 64 * 1024
 
 
 def _authorized(founder: bool = False) -> bool:
+    # Founder operations always require the creator-only token. Ordinary creative
+    # endpoints may also use an authenticated server-side session with CSRF checks.
+    if not founder and request.cookies.get("elyntro_session"):
+        try:
+            from shared_identity import current_user
+            if current_user():
+                if request.method not in {"GET", "HEAD", "OPTIONS"}:
+                    csrf_cookie = request.cookies.get("elyntro_csrf", "")
+                    csrf_header = request.headers.get("X-Elyntro-CSRF", "")
+                    if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+                        return False
+                return True
+        except Exception:
+            pass
     expected = os.getenv("ELYNTRO_FOUNDER_TOKEN" if founder else "ELYNTRO_API_KEY", "").strip()
     if not expected:
         return False
@@ -37,6 +51,14 @@ def _authorized(founder: bool = False) -> bool:
 
 def _json_error(message: str, status: int):
     return jsonify({"ok": False, "error": message}), status
+
+
+def _comfy_headers(extra=None):
+    headers = dict(extra or {})
+    key = os.getenv("COMFYUI_API_KEY", "").strip()
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    return headers
 
 
 def _comfy_base() -> str:
@@ -58,9 +80,9 @@ def creative_status():
         "ok": True,
         "features": {
             "threejs_scene": {"available": True, "mode": "browser-local", "route": "/creative-studio"},
-            "comfyui": {"available": bool(_comfy_base()), "configured": bool(_comfy_base()),
-                        "reason": None if _comfy_base() else "Configura COMFYUI_BASE_URL en el entorno donde se ejecuta ComfyUI o Elyntro."},
-            "playwright": {"available": bool(os.getenv("ELYNTRO_BROWSER_WORKER_URL", "").strip() and os.getenv("ELYNTRO_BROWSER_WORKER_TOKEN", "").strip()), "enabled": os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() == "true", "mode": "private_worker"},
+            "comfyui": {"available": bool(_comfy_base()), "configured": bool(_comfy_base()), "auth_configured": bool(os.getenv("COMFYUI_API_KEY", "").strip()),
+                        "reason": None if _comfy_base() else "Configura COMFYUI_BASE_URL en el servidor ComfyUI o en Elyntro."},
+            "playwright": {"available": bool(os.getenv("ELYNTRO_BROWSER_WORKER_URL", "").strip() and os.getenv("ELYNTRO_BROWSER_WORKER_TOKEN", "").strip()), "enabled": os.getenv("ELYNTRO_PLAYWRIGHT_ENABLED", "").lower() == "true", "mode": "isolated_worker"},
             "founder_mode": {"available": bool(os.getenv("ELYNTRO_FOUNDER_TOKEN", "").strip()), "proposal_only": True},
             "self_modification": {
                 "mode": "reviewable_proposals_and_optional_draft_pr",
@@ -70,7 +92,7 @@ def creative_status():
                     and bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", os.getenv("ELYNTRO_GITHUB_REPOSITORY", "").strip())),
             },
         },
-        "security": {"browser_navigation": "public-http(s)-only; allowlist required", "self_modification": "branch and draft PR only; never auto-merges or deploys"}
+        "security": {"browser_navigation": "public-http(s)-only; explicit allowlist and bearer-authenticated worker", "self_modification": "branch and draft PR only; never auto-merges or deploys"}
     })
 
 
@@ -131,6 +153,25 @@ def _proxy_browser_worker(endpoint: str):
         return jsonify({"ok": False, "error": "No se pudo contactar con el worker privado.", "detail": type(exc).__name__}), 502
 
 
+@creative_api.get("/comfyui/models")
+def comfyui_models():
+    if not _authorized():
+        return _json_error("Inicia sesión o configura una clave API de Elyntro.", 401)
+    base = _comfy_base()
+    if not base:
+        return _json_error("ComfyUI no está configurado.", 503)
+    req = urllib.request.Request(base + "/object_info/CheckpointLoaderSimple", headers=_comfy_headers({"Accept": "application/json"}))
+    try:
+        with urllib.request.urlopen(req, timeout=8) as response:
+            data = json.loads(response.read(256_000).decode("utf-8"))
+        models = data.get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[]])[0]
+        if not isinstance(models, list):
+            models = []
+        return jsonify({"ok": True, "models": [str(x) for x in models[:100] if isinstance(x, str)]})
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError, AttributeError, IndexError) as exc:
+        return jsonify({"ok": False, "error": "No se pudieron consultar los modelos de ComfyUI.", "detail": type(exc).__name__}), 502
+
+
 @creative_api.post("/comfyui/generate")
 def comfyui_generate():
     if not _authorized():
@@ -174,7 +215,7 @@ def comfyui_generate():
     if prompt_nodes == 0:
         return _json_error("No se pudo identificar el nodo CLIPTextEncode positivo. Conecta un sampler al nodo positive; los workflows ambiguos se rechazan.", 400)
     body = json.dumps({"prompt": workflow}).encode()
-    req = urllib.request.Request(base + "/prompt", data=body, headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(base + "/prompt", data=body, headers=_comfy_headers({"Content-Type": "application/json"}), method="POST")
     try:
         with urllib.request.urlopen(req, timeout=8) as response:
             data = json.loads(response.read(128_000).decode("utf-8"))
@@ -193,7 +234,7 @@ def comfyui_history(prompt_id: str):
         return _json_error("ComfyUI no está configurado.", 503)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", prompt_id):
         return _json_error("prompt_id no válido.", 400)
-    req = urllib.request.Request(base + "/history/" + urllib.parse.quote(prompt_id, safe=""))
+    req = urllib.request.Request(base + "/history/" + urllib.parse.quote(prompt_id, safe=""), headers=_comfy_headers())
     try:
         with urllib.request.urlopen(req, timeout=8) as response:
             data = json.loads(response.read(128_000).decode("utf-8"))
@@ -241,7 +282,7 @@ def comfyui_view(prompt_id: str, filename: str):
         if not isinstance(subfolder, str) or len(subfolder) > 240 or ".." in subfolder.split("/") or subfolder.startswith("/"):
             return _json_error("Ruta de salida no válida.", 400)
         query = urllib.parse.urlencode({"filename": filename, "subfolder": subfolder, "type": "output"})
-        image_req = urllib.request.Request(base + "/view?" + query, headers={"Accept": "image/png,image/jpeg,image/webp"})
+        image_req = urllib.request.Request(base + "/view?" + query, headers=_comfy_headers({"Accept": "image/png,image/jpeg,image/webp"}))
         with urllib.request.urlopen(image_req, timeout=12) as response:
             payload = response.read(8_000_001)
             media_type = response.headers.get_content_type()
@@ -391,6 +432,77 @@ def _proposal_root() -> Path:
     return Path(os.getenv("ELYNTRO_PROPOSAL_DIR", "/tmp/elyntro-proposals"))
 
 
+def _proposal_database_url() -> str:
+    value = os.getenv("ELYNTRO_DATABASE_URL", "").strip()
+    if value.startswith("postgres://"):
+        value = "postgresql://" + value[len("postgres://"):]
+    return value
+
+
+def _proposal_db_connect():
+    import psycopg
+    return psycopg.connect(_proposal_database_url(), connect_timeout=5)
+
+
+def _proposal_ensure_table(db):
+    with db.cursor() as cur:
+        cur.execute("""CREATE TABLE IF NOT EXISTS elyntro_founder_proposals (
+            proposal_id TEXT PRIMARY KEY, payload JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""")
+
+
+def _proposal_write(record: dict) -> None:
+    if _proposal_database_url():
+        with _proposal_db_connect() as db:
+            _proposal_ensure_table(db)
+            with db.cursor() as cur:
+                cur.execute("""INSERT INTO elyntro_founder_proposals(proposal_id,payload)
+                    VALUES (%s,%s::jsonb) ON CONFLICT (proposal_id) DO UPDATE SET payload=EXCLUDED.payload""",
+                    (record["id"], json.dumps(record, ensure_ascii=False)))
+            db.commit()
+        return
+    root = _proposal_root()
+    root.mkdir(parents=True, exist_ok=True)
+    (root / (record["id"] + ".json")).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _proposal_read(proposal_id: str) -> dict | None:
+    if _proposal_database_url():
+        with _proposal_db_connect() as db:
+            _proposal_ensure_table(db)
+            with db.cursor() as cur:
+                cur.execute("SELECT payload FROM elyntro_founder_proposals WHERE proposal_id=%s", (proposal_id,))
+                row = cur.fetchone()
+        if not row:
+            return None
+        return json.loads(row[0]) if isinstance(row[0], str) else row[0]
+    try:
+        return json.loads((_proposal_root() / (proposal_id + ".json")).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+
+
+def _proposal_list() -> list[dict]:
+    if _proposal_database_url():
+        with _proposal_db_connect() as db:
+            _proposal_ensure_table(db)
+            with db.cursor() as cur:
+                cur.execute("SELECT payload FROM elyntro_founder_proposals ORDER BY created_at DESC LIMIT 100")
+                rows = cur.fetchall()
+        return [json.loads(row[0]) if isinstance(row[0], str) else row[0] for row in rows]
+    root = _proposal_root()
+    root.mkdir(parents=True, exist_ok=True)
+    proposals = []
+    for path in sorted(root.glob("prop_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:100]:
+        try:
+            item = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(item, dict) and re.fullmatch(r"prop_[a-f0-9]{16}", str(item.get("id", ""))):
+                proposals.append(item)
+        except (OSError, ValueError):
+            continue
+    return proposals
+
+
 def save_founder_proposal(title: str, rationale: str, patch: str) -> dict:
     if not all(isinstance(value, str) and value.strip() for value in (title, rationale, patch)):
         raise ValueError("title, rationale y patch son obligatorios.")
@@ -403,9 +515,7 @@ def save_founder_proposal(title: str, rationale: str, patch: str) -> dict:
         "created_at": int(time.time()), "status": "pending_human_review",
         "policy": {"auto_apply": False, "execute_patch": False, "requires_tests": True, "requires_human_approval": True}
     }
-    root = _proposal_root()
-    root.mkdir(parents=True, exist_ok=True)
-    (root / (proposal_id + ".json")).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    _proposal_write(record)
     return record
 
 
@@ -413,19 +523,11 @@ def save_founder_proposal(title: str, rationale: str, patch: str) -> dict:
 def founder_list_proposals():
     if not _authorized(founder=True):
         return _json_error("Founder Mode requiere ELYNTRO_FOUNDER_TOKEN.", 401)
-    root = _proposal_root()
-    proposals = []
     try:
-        root.mkdir(parents=True, exist_ok=True)
-        for path in sorted(root.glob("prop_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:100]:
-            try:
-                item = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(item, dict) and re.fullmatch(r"prop_[a-f0-9]{16}", str(item.get("id", ""))):
-                    proposals.append({key: item.get(key) for key in ("id", "title", "rationale", "patch_sha256", "created_at", "reviewed_at", "status", "policy")})
-            except (OSError, ValueError):
-                continue
-    except OSError:
-        return _json_error("No se pudieron leer las propuestas.", 500)
+        proposals = [{key: item.get(key) for key in ("id", "title", "rationale", "patch_sha256", "created_at", "reviewed_at", "status", "policy")}
+                     for item in _proposal_list() if isinstance(item, dict)]
+    except Exception:
+        return _json_error("No se pudieron leer las propuestas desde el almacenamiento configurado.", 503)
     return jsonify({"ok": True, "proposals": proposals})
 
 
@@ -435,13 +537,12 @@ def founder_get_proposal(proposal_id: str):
         return _json_error("Founder Mode requiere ELYNTRO_FOUNDER_TOKEN.", 401)
     if not re.fullmatch(r"prop_[a-f0-9]{16}", proposal_id):
         return _json_error("Identificador de propuesta no válido.", 400)
-    path = _proposal_root() / (proposal_id + ".json")
     try:
-        record = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
+        record = _proposal_read(proposal_id)
+    except Exception:
+        return _json_error("No se pudo leer la propuesta desde el almacenamiento configurado.", 503)
+    if not record:
         return _json_error("Propuesta no encontrada.", 404)
-    except (OSError, ValueError):
-        return _json_error("No se pudo leer la propuesta.", 500)
     patch = record.get("patch")
     if not isinstance(patch, str) or hashlib.sha256(patch.encode()).hexdigest() != record.get("patch_sha256"):
         return _json_error("La integridad del parche no coincide con su SHA-256 registrado.", 409)
@@ -478,9 +579,9 @@ def founder_review_proposal(proposal_id: str):
     record["review_decision"] = decision
     record["policy"] = {"auto_apply": False, "execute_patch": False, "requires_tests": True, "requires_human_approval": True}
     try:
-        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
-        return _json_error("No se pudo guardar la revisión.", 500)
+        _proposal_write(record)
+    except Exception:
+        return _json_error("No se pudo guardar la revisión en el almacenamiento configurado.", 503)
     return jsonify({"ok": True, "proposal": {key: record.get(key) for key in ("id", "title", "status", "reviewed_at", "patch_sha256", "policy")},
                     "note": "La aprobación autoriza revisión/implementación manual; no aplica ni ejecuta el parche."})
 
@@ -503,10 +604,8 @@ def founder_proposal():
         "created_at": int(time.time()), "status": "pending_human_review",
         "policy": {"auto_apply": False, "execute_patch": False, "requires_tests": True, "requires_human_approval": True}
     }
-    root = _proposal_root()
     try:
-        root.mkdir(parents=True, exist_ok=True)
-        (root / (proposal_id + ".json")).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
-        return _json_error("No se pudo guardar la propuesta en este entorno.", 500)
+        _proposal_write(record)
+    except Exception:
+        return _json_error("No se pudo guardar la propuesta en el almacenamiento configurado.", 503)
     return jsonify({"ok": True, "proposal": record, "note": "No se ha aplicado ningún cambio al código."}), 201
