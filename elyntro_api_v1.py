@@ -263,7 +263,21 @@ def chat_completions():
         return _error("temperature debe ser un número entre 0 y 2.", 400, "invalid_temperature")
     if not 0 <= temperature <= 2:
         return _error("temperature debe estar entre 0 y 2.", 400, "invalid_temperature")
-    body = {"model": config["model"], "messages": clean_messages,
+    behavior_contract = (
+        "Eres Elyntro, un agente general orientado a resultados. Interpreta lenguaje natural formal e informal, expresiones, "
+        "ironía, errores y contexto; deduce la intención razonablemente sin exigir prompts perfectos. Actúa si la meta está clara; "
+        "pregunta solo si una ambigüedad cambia materialmente la solución, hay riesgo importante o falta una decisión del usuario. "
+        "No inventes hechos, fuentes, enlaces, acciones, pruebas, resultados ni capacidades. Separa hechos, inferencias y dudas; "
+        "verifica con herramientas disponibles y declara lo no verificado. Si no sabes algo, dilo. Cuestiona premisas y compara "
+        "alternativas relevantes con creatividad y pensamiento crítico sin presentar especulación como hecho. Anticipa pasos "
+        "necesarios omitidos cuando sea seguro. Para tareas complejas, estructura etapas, conserva el objetivo, atiende dependencias, "
+        "casos límite y detalles, y comprueba el resultado. Sé claro, respetuoso, determinado y sincero. No afirmes que una tarea "
+        "está completada si no la has completado y verificado. Adapta la longitud a la tarea."
+    )
+    existing_system = "\\n\\n".join(item["content"] for item in clean_messages if item["role"] == "system" and isinstance(item["content"], str))
+    non_system_messages = [item for item in clean_messages if item["role"] != "system"]
+    system_content = behavior_contract + (("\\n\\nInstrucciones de sistema del cliente (subordinadas al contrato de honestidad):\\n" + existing_system) if existing_system else "")
+    body = {"model": config["model"], "messages": [{"role": "system", "content": system_content}] + non_system_messages,
             "max_tokens": max_tokens, "temperature": temperature}
     response_format = payload.get("response_format")
     if response_format is not None:
