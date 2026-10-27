@@ -519,6 +519,7 @@
     let busy = false;
     let attachedText = null;
     let attachedMedia = [];
+    let mediaCapabilities = {};
     let activeController = null;
     let stopRequestedByUser = false;
 
@@ -872,7 +873,7 @@
         }
         let requestUrl = "/api/agent/execute";
         let requestPayload = { goal: fullPrompt, history: requestHistory, async: true };
-        const audioFiles = currentMedia.filter(item => item.file.type.startsWith("audio/"));
+        const audioFiles = currentMedia.filter(item => item.file.type.startsWith("audio/") || /\\.(wav|mp3|m4a|mp4|mpeg|mpga|webm|ogg|flac)$/i.test(item.file.name));
         for (const item of audioFiles) {
           const form = new FormData();
           form.append("file", item.file, item.file.name);
@@ -883,7 +884,8 @@
           if (!transcriptResponse.ok || !transcriptData.ok) throw new Error(transcriptData.error || "No se pudo transcribir el audio.");
           fullPrompt += `\n\n--- Transcripción de ${item.file.name} ---\n${transcriptData.text}\n--- Fin de la transcripción ---`;
         }
-        const visualFiles = currentMedia.filter(item => !item.file.type.startsWith("audio/"));
+        if (fullPrompt.length > 10000) throw new Error("La transcripción y el mensaje superan 10.000 caracteres.");
+        const visualFiles = currentMedia.filter(item => !audioFiles.includes(item));
         if (visualFiles.length) {
           const encodedAttachments = [];
           for (const item of visualFiles) encodedAttachments.push({
@@ -991,7 +993,7 @@
       const bar = element("div", "response-actions");
       const make = (label, action) => { const b = element("button", "", label); b.type = "button"; b.addEventListener("click", action); bar.append(b); return b; };
       make("Regenerar", () => submitPrompt(originalPrompt));
-      make("Leer en voz alta", async () => {
+      const speakButton = make("Leer en voz alta", async () => {
         try {
           $("status").textContent = "Generando audio…";
           const response = await fetch("/api/media/generate-speech", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ text: answer.slice(0, 5000) }) });
@@ -1002,6 +1004,8 @@
           $("status").textContent = "Audio generado por el proveedor configurado.";
         } catch (error) { $("status").textContent = error.message; }
       });
+      speakButton.classList.add("speak-response");
+      speakButton.disabled = mediaCapabilities.speech_generation ? !mediaCapabilities.speech_generation.available : false;
       make("Más simple", () => submitPrompt("Reexplica con palabras más sencillas y un ejemplo breve.\n\nPregunta: " + originalPrompt + "\n\nRespuesta anterior:\n" + answer));
       make("Ampliar", () => submitPrompt("Amplía la respuesta con más profundidad y matices importantes.\n\nPregunta: " + originalPrompt + "\n\nRespuesta anterior:\n" + answer));
       make("Ejemplos", () => submitPrompt("Añade 3 ejemplos concretos sobre la respuesta anterior.\n\nPregunta: " + originalPrompt + "\n\nRespuesta:\n" + answer));
@@ -1407,6 +1411,28 @@
         $("model-label").textContent = "Proveedor sin comprobar";
       }
     }
+    async function checkMediaCapabilities() {
+      try {
+        const response = await fetch("/api/media/capabilities", { credentials: "same-origin" });
+        const data = await responseJson(response);
+        if (!response.ok || !data.ok) throw new Error("No se pudieron consultar las capacidades multimedia.");
+        mediaCapabilities = data.capabilities || {};
+        for (const [id, key] of [["generate-image","image_generation"],["generate-video","video_generation"]]) {
+          const button = $(id);
+          const capability = mediaCapabilities[key] || {};
+          button.disabled = !capability.available;
+          button.title = capability.available ? "Proveedor multimedia configurado" : "Función no configurada en el servidor";
+        }
+        document.querySelectorAll(".speak-response").forEach(button => {
+          button.disabled = !mediaCapabilities.speech_generation?.available;
+          button.title = button.disabled ? "La síntesis de voz no está configurada en el servidor" : "Generar audio de esta respuesta";
+        });
+      } catch {
+        $("generate-image").disabled = true;
+        $("generate-video").disabled = true;
+      }
+    }
+
     function csrfToken() {
       const match = document.cookie.match(/(?:^|; )elyntro_csrf=([^;]+)/);
       return match ? decodeURIComponent(match[1]) : "";
@@ -1546,6 +1572,7 @@
     restoreHistory();
     refreshIdentity();
     checkHealth();
+    checkMediaCapabilities();
   </script>
 </body>
 </html>
