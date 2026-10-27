@@ -123,6 +123,26 @@
     .message-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--muted); font-size: 10px; font-weight: 740; letter-spacing: 1px; text-transform: uppercase; }
     .message-body p { margin: 0 0 9px; }
     .message-body p:last-child { margin-bottom: 0; }
+    .message-body { font-size: 14px; line-height: 1.78; }
+    .message-body h1, .message-body h2, .message-body h3 { margin: 22px 0 9px; line-height: 1.25; letter-spacing: -.45px; }
+    .message-body h1 { font-size: 23px; } .message-body h2 { font-size: 19px; } .message-body h3 { font-size: 15px; }
+    .message-body ul, .message-body ol { margin: 8px 0 14px; padding-left: 24px; }
+    .message-body li { margin: 4px 0; padding-left: 3px; }
+    .message-body blockquote { margin: 12px 0; padding: 9px 14px; border-left: 3px solid var(--accent-strong); color: var(--muted); background: #ffffff06; }
+    .message-body pre { margin: 12px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #080d18; overflow: auto; }
+    .message-body pre code { color: #dbe4ff; font-size: 12px; line-height: 1.6; }
+    .message-body code.inline-code { padding: 2px 5px; border: 1px solid var(--line); border-radius: 5px; background: #ffffff0a; font-size: .9em; }
+    .message-body hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+    .response-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #ffffff12; }
+    .response-actions button, .followup-chip { padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background: #ffffff05; color: var(--muted); font-size: 11px; }
+    .response-actions button:hover, .followup-chip:hover { border-color: var(--accent-strong); color: var(--text); }
+    .response-actions .feedback-selected { border-color: var(--teal); color: var(--teal); }
+    .followups { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+    .composer-tools { flex-wrap: wrap; }
+    .voice-button.listening { border-color: var(--danger); color: var(--danger); }
+    body.light .message-body pre { background: #182033; }
+    body.light .response-actions button, body.light .followup-chip { background: #ffffff; }
+
     .composer-wrap { position: sticky; bottom: 0; width: min(880px, 100%); margin: 0 auto; padding: 12px 0 max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--bg) 17%); }
     .composer { padding: 10px; border: 1px solid #45506a; border-radius: 18px; background: #1a2030; box-shadow: 0 14px 45px #0005; }
     .composer:focus-within { border-color: #8295f5; box-shadow: 0 0 0 3px #8295f51c, 0 14px 45px #0005; }
@@ -237,6 +257,7 @@
             <span class="badge"><span class="dot" id="health-dot"></span><span id="health-label">Comprobando API…</span></span>
             <span class="badge" id="model-label">Modelo sin comprobar</span>
           </div>
+          <button class="utility-button" id="search-chat" type="button" aria-label="Buscar en la conversación">Buscar</button>
           <button class="utility-button" id="theme-toggle" type="button" aria-label="Cambiar tema">Tema</button>
           <button class="utility-button" id="export-chat" type="button">Exportar</button>
           <button class="utility-button" id="clear-history" type="button" title="Borra los mensajes guardados en este navegador">Borrar historial</button>
@@ -260,6 +281,10 @@
           <button class="suggestion" data-prompt="Crea una página web de presentación para un proyecto científico, con objetivo, método y resultados."><strong>Crear un artefacto</strong><span>Genera un archivo descargable desde la tarea.</span></button>
         </section>
 
+        <div id="search-panel" hidden style="width:min(880px,100%);margin:0 auto 12px">
+          <input id="search-input" type="search" placeholder="Buscar en los mensajes…" aria-label="Buscar en los mensajes" style="width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text)">
+          <div id="search-results" class="artifact-meta" aria-live="polite"></div>
+        </div>
         <section class="conversation" id="conversation" aria-live="polite" aria-label="Conversación"></section>
 
         <div class="composer-wrap">
@@ -267,6 +292,8 @@
             <div class="composer">
               <div class="composer-tools">
                 <button class="attach-button" id="attach-file" type="button">＋ Adjuntar texto</button>
+                <button class="attach-button voice-button" id="voice-input" type="button" title="Dictado por voz si el navegador lo admite">Dictar</button>
+                <button class="attach-button" id="stop-request" type="button" hidden>Detener</button>
                 <input id="file-input" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden>
                 <span id="attachment" aria-live="polite"></span>
               </div>
@@ -298,6 +325,7 @@
     let busy = false;
     let attachedText = null;
     let activeController = null;
+    let stopRequestedByUser = false;
 
     function element(tag, className, text) {
       const node = document.createElement(tag);
@@ -306,13 +334,50 @@
       return node;
     }
 
+    function renderMarkdown(container, source) {
+      container.replaceChildren();
+      const lines = String(source || "").replace(/\r\n?/g, "\n").split("\n");
+      let list = null, codeLines = null, codeNode = null;
+      const inline = (parent, raw) => {
+        const pattern = /(\*\*[^*]+\*\*|\*[^*\n]+\*|\x60[^\x60\n]+\x60|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g;
+        let last = 0, match;
+        while ((match = pattern.exec(raw))) {
+          if (match.index > last) parent.append(document.createTextNode(raw.slice(last, match.index)));
+          const token = match[0];
+          if (token.startsWith("**")) parent.append(element("strong", "", token.slice(2, -2)));
+          else if (token.startsWith("*")) parent.append(element("em", "", token.slice(1, -1)));
+          else if (token.startsWith("`")) parent.append(element("code", "inline-code", token.slice(1, -1)));
+          else { const m = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/); if (m) { const a = element("a", "", m[1]); a.href = m[2]; a.target = "_blank"; a.rel = "noopener noreferrer"; parent.append(a); } }
+          last = pattern.lastIndex;
+        }
+        if (last < raw.length) parent.append(document.createTextNode(raw.slice(last)));
+      };
+      for (const line of lines) {
+        if (/^\x60\x60\x60/.test(line)) {
+          if (codeLines) { codeNode._code.textContent = codeLines.join("\n"); container.append(codeNode); codeLines = null; codeNode = null; }
+          else { codeLines = []; codeNode = element("pre"); const code = element("code"); codeNode.append(code); codeNode._code = code; }
+          list = null; continue;
+        }
+        if (codeLines) { codeLines.push(line); codeNode._code.textContent = codeLines.join("\n"); continue; }
+        if (!line.trim()) { list = null; continue; }
+        if (/^---+$/.test(line.trim())) { list = null; container.append(document.createElement("hr")); continue; }
+        const h = line.match(/^(#{1,3})\s+(.+)$/);
+        if (h) { list = null; const node = element("h" + h[1].length); inline(node, h[2]); container.append(node); continue; }
+        const bullet = line.match(/^\s*[-*+]\s+(.+)$/), numbered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        if (bullet || numbered) { const kind = bullet ? "ul" : "ol"; if (!list || list.tagName.toLowerCase() !== kind) { list = document.createElement(kind); container.append(list); } const li = document.createElement("li"); inline(li, (bullet || numbered)[1]); list.append(li); continue; }
+        if (/^>\s?/.test(line)) { list = null; const q = document.createElement("blockquote"); inline(q, line.replace(/^>\s?/, "")); container.append(q); continue; }
+        list = null; const p = document.createElement("p"); inline(p, line); container.append(p);
+      }
+      if (codeLines && codeNode) { codeNode._code.textContent = codeLines.join("\n"); container.append(codeNode); }
+    }
+
     function addMessage(role, label, text = "") {
       const article = element("article", `message ${role}`);
       const head = element("div", "message-head");
       head.append(element("span", "", role === "user" ? "Tú" : "Elyntro"));
       head.append(element("span", "", label));
       const body = element("div", "message-body");
-      if (text) body.textContent = text;
+      if (text) { if (role === "assistant") renderMarkdown(body, text); else body.textContent = text; }
       article.append(head, body);
       if (role === "assistant" && text) {
         const tools = element("div", "message-tools");
@@ -480,8 +545,10 @@
         return;
       }
       busy = true;
+      stopRequestedByUser = false;
       $("prompt").value = "";
       $("send").disabled = true;
+      $("stop-request").hidden = false;
       $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
       const requestHistory = history.slice(-10);
       addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo adjunto: ${attachedText.name}]` : ""));
@@ -516,7 +583,7 @@
         pending.body.replaceChildren();
         if (data.kind === "answer") {
           pending.article.querySelector(".message-head span:last-child").textContent = "Respuesta";
-          pending.body.append(element("p", "", data.answer || ""));
+          renderMarkdown(pending.body, data.answer || "");
           addSources(pending.body, data.sources);
           if (Array.isArray(data.events) && data.events.length) {
             const eventCard = addCard(pending.body, `Registro de herramientas · ${data.events.length}`);
@@ -533,6 +600,7 @@
           meta.append(element("p", "", `Verificación: ${data.verification?.status || "no aplicable"}`));
           $("status").textContent = "Respuesta recibida; no equivale a verificación factual independiente.";
           history.push({ role: "assistant", content: data.answer || "" });
+          addResponseActions(pending.article, prompt, data.answer || "");
         } else {
           pending.article.querySelector(".message-head span:last-child").textContent = "Resultado de tarea";
           renderTask(pending.body, data);
@@ -547,17 +615,63 @@
       } catch (error) {
         pending.article.classList.add("error");
         pending.body.textContent = error.name === "AbortError"
-          ? "Se agotó el tiempo de espera de la interfaz. La operación del servidor podría haber continuado."
+          ? (stopRequestedByUser
+            ? "Has detenido la espera desde la interfaz. La operación del servidor podría haber continuado."
+            : "Se agotó el tiempo de espera de la interfaz. La operación del servidor podría haber continuado.")
           : `No se pudo completar la petición: ${error.message}`;
-        $("status").textContent = "Error de comunicación o tiempo de espera.";
+        $("status").textContent = error.name === "AbortError" && stopRequestedByUser
+          ? "Espera detenida por el usuario."
+          : "Error de comunicación o tiempo de espera.";
       } finally {
         window.clearTimeout(timeout);
         busy = false;
         activeController = null;
         $("send").disabled = false;
+        $("stop-request").hidden = true;
         $("prompt").focus();
       }
     }
+
+    function addResponseActions(article, originalPrompt, answer) {
+      const bar = element("div", "response-actions");
+      const make = (label, action) => { const b = element("button", "", label); b.type = "button"; b.addEventListener("click", action); bar.append(b); return b; };
+      make("Regenerar", () => submitPrompt(originalPrompt));
+      make("Más simple", () => submitPrompt("Reexplica con palabras más sencillas y un ejemplo breve.\n\nPregunta: " + originalPrompt + "\n\nRespuesta anterior:\n" + answer));
+      make("Ampliar", () => submitPrompt("Amplía la respuesta con más profundidad y matices importantes.\n\nPregunta: " + originalPrompt + "\n\nRespuesta anterior:\n" + answer));
+      make("Ejemplos", () => submitPrompt("Añade 3 ejemplos concretos sobre la respuesta anterior.\n\nPregunta: " + originalPrompt + "\n\nRespuesta:\n" + answer));
+      make("Comprobar crítica", () => submitPrompt("Revisa críticamente la respuesta: identifica supuestos, posibles errores y qué habría que verificar. No inventes fuentes.\n\nPregunta: " + originalPrompt + "\n\nRespuesta:\n" + answer));
+      const up = make("Útil", () => { up.classList.toggle("feedback-selected"); $("status").textContent = "Valoración local; aún no se envía al servidor."; });
+      const down = make("No útil", () => { down.classList.toggle("feedback-selected"); $("status").textContent = "Valoración local; aún no se envía al servidor."; });
+      article.append(bar);
+      const chips = element("div", "followups");
+      for (const label of ["Dame un plan de acción", "¿Qué puede salir mal?", "Resúmelo en 5 puntos"]) { const b = element("button", "followup-chip", label); b.type = "button"; b.addEventListener("click", () => submitPrompt(label + " usando como contexto esta pregunta y respuesta.\n\nPregunta: " + originalPrompt + "\n\nRespuesta:\n" + answer)); chips.append(b); }
+      article.append(chips);
+    }
+    $("stop-request").addEventListener("click", () => {
+      if (activeController) {
+        stopRequestedByUser = true;
+        activeController.abort();
+      }
+      $("status").textContent = "Se ha solicitado detener la espera. El servidor podría seguir procesando la tarea.";
+    });
+    $("search-chat").addEventListener("click", () => { const panel = $("search-panel"); panel.hidden = !panel.hidden; if (!panel.hidden) $("search-input").focus(); });
+    $("search-input").addEventListener("input", () => {
+      const q = $("search-input").value.trim().toLocaleLowerCase(), messages = [...conversation.querySelectorAll(".message")];
+      const matches = q ? messages.filter(m => (m.innerText || "").toLocaleLowerCase().includes(q)) : [];
+      $("search-results").textContent = q ? (matches.length ? matches.length + " mensaje(s) encontrado(s)" : "Sin coincidencias") : "";
+      if (matches[0]) matches[0].scrollIntoView({behavior:"smooth",block:"center"});
+      messages.forEach(m => m.style.outline = q && (m.innerText || "").toLocaleLowerCase().includes(q) ? "2px solid var(--accent-strong)" : "");
+    });
+    $("voice-input").addEventListener("click", () => {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) { $("status").textContent = "Este navegador no ofrece dictado compatible. Puedes usar el dictado del teclado del dispositivo."; return; }
+      const button = $("voice-input"), recognition = new SpeechRecognition(); recognition.lang = "es-ES"; recognition.interimResults = true;
+      button.classList.add("listening"); button.textContent = "Escuchando…";
+      recognition.onresult = event => { let t = ""; for (let i=0;i<event.results.length;i++) t += event.results[i][0].transcript; $("prompt").value = t; };
+      recognition.onerror = () => { $("status").textContent = "No se pudo completar el dictado. Comprueba el permiso del micrófono."; };
+      recognition.onend = () => { button.classList.remove("listening"); button.textContent = "Dictar"; };
+      try { recognition.start(); } catch { button.classList.remove("listening"); button.textContent = "Dictar"; $("status").textContent = "No se pudo iniciar el dictado."; }
+    });
 
     $("composer-form").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -803,6 +917,12 @@
         $("model-label").textContent = "Proveedor sin comprobar";
       }
     }
+    try {
+      if (localStorage.getItem(THEME_KEY) === "light") {
+        document.body.classList.add("light");
+        $("theme-toggle").textContent = "Cambiar a oscuro";
+      }
+    } catch {}
     try {
       if (localStorage.getItem(THEME_KEY) === "light") {
         document.body.classList.add("light");

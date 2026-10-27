@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
-from elyntro_api_v1 import api_v1
+from elyntro_api_v1 import api_v1, _model_pool
 from werkzeug.middleware.proxy_fix import ProxyFix
 from elyntro import CognitiveLoop, EvidenceVerifier
 from elyntro.contracts import TaskRequest
@@ -429,6 +429,21 @@ def classify_request(goal: str) -> str:
 
 def _model_provider_config():
     """Resolve the configured model backend without exposing credentials."""
+    # The same server-side model pool powers both the public v1 gateway and
+    # Elyntro's first-party UI/runtime. Browser clients never receive provider keys.
+    pool = _model_pool()
+    if pool and os.environ.get("ELYNTRO_MODEL_POOL", "").strip():
+        selected = next((item for item in pool if item.get("primary")), pool[0])
+        return {
+            "provider": selected["provider"],
+            "base_url": selected["base_url"].rstrip("/"),
+            "api_key_env": selected.get("key_env", ""),
+            "api_key": selected.get("api_key", ""),
+            "model": selected["model"],
+            "model_alias": selected["id"],
+            "configured": True,
+            "error": None,
+        }
     provider = os.environ.get("ELYNTRO_MODEL_PROVIDER", "groq").strip().casefold()
     configs = {
         "groq": {
@@ -473,19 +488,10 @@ def _model_provider_config():
     }
 
 
-def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=False):
-    """Legacy-compatible name for Elyntro's provider-neutral model adapter."""
-    config = _model_provider_config()
-    if not config["configured"]:
-        provider = config["provider"]
-        if config.get("error") == "provider_unsupported":
-            message = "ELYNTRO_MODEL_PROVIDER no corresponde a un proveedor compatible."
-        elif config.get("error") == "provider_base_url_missing":
-            message = "Configura ELYNTRO_MODEL_BASE_URL para el proveedor compatible."
-        else:
-            message = f"El proveedor {provider} no está configurado; revisa su clave, URL y modelo."
-        return {"text": None, "error": message, "error_code": "provider_not_configured", "retryable": False,
-                "provider": provider}
+def _call_model_config(config, messages, *, max_tokens=1800, temperature=0.2, json_mode=False):
+    """Call exactly one configured upstream model; credentials stay server-side."""
+    if not config.get("configured", True):
+        return {"text": None, "error": "El modelo no está configurado.", "error_code": "provider_not_configured", "retryable": False, "provider": config.get("provider", "unknown")}
     api_key = config["api_key"]
     model = config["model"]
     body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
@@ -546,6 +552,82 @@ def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=Fals
                 "error_code": "provider_timeout" if timed_out else "provider_connection_failed",
                 "retryable": True, "provider": config["provider"]}
 
+
+
+def _answer_quality_score(text, messages):
+    """Deterministic answer-quality proxy; not a factuality verifier."""
+    if not isinstance(text, str) or not text.strip():
+        return 0.0
+    answer = text.strip()
+    words = re.findall(r"\b[\wáéíóúüñÁÉÍÓÚÜÑ'-]+\b", answer.casefold())
+    if not words:
+        return 0.0
+    score = 0.0
+    # Reward useful substance without simply rewarding the longest output.
+    score += min(len(words) / 180.0, 1.0) * 2.0
+    if len(words) >= 35:
+        score += 1.0
+    if re.search(r"(?m)^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s)", answer):
+        score += 0.7
+    if re.search(r"(?i)\b(por ejemplo|paso a paso|en resumen|sin embargo|porque|por tanto)\b", answer):
+        score += 0.5
+    if re.search(r"(?i)\b(no lo sé|no puedo ayudar|no puedo responder)\b", answer) and len(words) < 45:
+        score -= 0.8
+    if len(set(words)) / max(len(words), 1) < 0.25:
+        score -= 0.8
+    # Small relevance signal from the user's latest message; never treats this as truth.
+    user_text = " ".join(str(m.get("content", "")) for m in messages if m.get("role") == "user")
+    terms = {w for w in re.findall(r"\b[\wáéíóúüñÁÉÍÓÚÜÑ'-]{5,}\b", user_text.casefold())}
+    if terms:
+        overlap = len(terms.intersection(set(words))) / len(terms)
+        score += min(overlap, 1.0) * 1.5
+    return round(score, 3)
+
+
+def _groq_messages(messages, *, max_tokens=1800, temperature=0.2, json_mode=False):
+    """Try configured models, fail over on errors, compare successes and choose by a transparent heuristic."""
+    pool = _model_pool()
+    if not pool:
+        config = _model_provider_config()
+        if not config.get("configured"):
+            provider = config.get("provider", "unknown")
+            return {"text": None, "error": f"El proveedor {provider} no está configurado; revisa su clave, URL y modelo.",
+                    "error_code": "provider_not_configured", "retryable": False, "provider": provider}
+        pool = [{**config, "id": config.get("model", "default"), "primary": True}]
+    # Primary first, then configured alternatives; cap calls per user request.
+    ordered = sorted(pool, key=lambda item: not bool(item.get("primary")))
+    ordered = ordered[:max(1, min(3, int(os.getenv("ELYNTRO_MAX_MODEL_CANDIDATES", "3"))))]
+    successes, failures = [], []
+    for candidate in ordered:
+        result = _call_model_config(candidate, messages, max_tokens=max_tokens,
+                                    temperature=temperature, json_mode=json_mode)
+        result["model_alias"] = candidate.get("id", candidate.get("model"))
+        result["model"] = result.get("model") or candidate.get("model")
+        if result.get("text"):
+            result["quality_score"] = _answer_quality_score(result["text"], messages)
+            successes.append(result)
+        else:
+            failures.append(result)
+        # Continue through candidates so we can compare answers, even after first success.
+    if successes:
+        selected = max(successes, key=lambda item: item.get("quality_score", 0))
+        selected["selection"] = "heuristic_quality_comparison" if len(successes) > 1 else "only_successful_candidate"
+        selected["models_compared"] = len(successes)
+        selected["providers_failed_over"] = len(failures)
+        selected["comparison"] = {
+            "candidates": [{"provider": item.get("provider"), "model": item.get("model_alias"),
+                            "quality_score": item.get("quality_score")} for item in successes],
+            "score_note": "Puntuación heurística de utilidad, estructura y relevancia; no es una verificación factual."
+        }
+        return selected
+    if failures:
+        # Surface the last useful failure while exposing no upstream credential.
+        final = failures[-1]
+        final["providers_attempted"] = len(failures)
+        final["providers_failed_over"] = max(0, len(failures) - 1)
+        return final
+    return {"text": None, "error": "No hay modelos disponibles.", "error_code": "provider_not_configured",
+            "retryable": False, "provider": "none"}
 
 def _provider_http_status(result):
     code = result.get("error_code")
