@@ -53,7 +53,7 @@ const assert = require("node:assert/strict");
     assert.equal(await firstAnswer.locator(".message-body ul li").count(), 2);
     assert.equal(await firstAnswer.locator(".message-body pre code").textContent(), "const x = 1;");
     assert.equal(await firstAnswer.locator(".message-body script").count(), 0, "el HTML de la respuesta no debe ejecutarse como HTML");
-    assert.equal(await firstAnswer.locator(".response-actions button").count(), 7, "acciones de respuesta");
+    assert.equal(await firstAnswer.locator(".response-actions button").count(), 8, "acciones de respuesta, incluida síntesis de voz");
 
     for (const label of ["Regenerar", "Más simple", "Ampliar", "Ejemplos", "Comprobar crítica"]) {
       const before = await page.locator("#conversation article.message.assistant").count();
