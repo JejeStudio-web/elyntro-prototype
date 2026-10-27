@@ -1488,7 +1488,7 @@ def direct_chat_stream():
     @stream_with_context
     def generate():
         try:
-            yield "data: " + json.dumps({"type": "meta", "provider": config["provider"], "model": config["model"]}) + "\\n\\n"
+            yield "data: " + json.dumps({"type": "meta", "provider": config["provider"], "model": config["model"]}) + "\n\n"
             with upstream:
                 for raw_line in upstream:
                     line = raw_line.decode("utf-8", errors="replace").strip()
@@ -1496,7 +1496,7 @@ def direct_chat_stream():
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
-                        yield "data: " + json.dumps({"type": "done"}) + "\\n\\n"
+                        yield "data: " + json.dumps({"type": "done"}) + "\n\n"
                         return
                     try:
                         parsed = json.loads(data)
@@ -1504,16 +1504,16 @@ def direct_chat_stream():
                         delta = choices[0].get("delta", {}) if choices else {}
                         token = delta.get("content") if isinstance(delta, dict) else None
                         if isinstance(token, str) and token:
-                            yield "data: " + json.dumps({"type": "delta", "text": token}, ensure_ascii=False) + "\\n\\n"
+                            yield "data: " + json.dumps({"type": "delta", "text": token}, ensure_ascii=False) + "\n\n"
                         error = parsed.get("error")
                         if error:
-                            yield "data: " + json.dumps({"type": "error", "message": "El proveedor interrumpió el streaming."}) + "\\n\\n"
+                            yield "data: " + json.dumps({"type": "error", "message": "El proveedor interrumpió el streaming."}) + "\n\n"
                             return
                     except (ValueError, TypeError, IndexError):
                         continue
-            yield "data: " + json.dumps({"type": "done"}) + "\\n\\n"
+            yield "data: " + json.dumps({"type": "done"}) + "\n\n"
         except (OSError, TimeoutError):
-            yield "data: " + json.dumps({"type": "error", "message": "Se perdió la conexión durante la respuesta."}) + "\\n\\n"
+            yield "data: " + json.dumps({"type": "error", "message": "Se perdió la conexión durante la respuesta."}) + "\n\n"
         finally:
             upstream.close()
     return Response(generate(), mimetype="text/event-stream",
