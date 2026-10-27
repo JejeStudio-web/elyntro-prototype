@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Premium Assistant</title>
+    <!-- Tailwind CSS para un diseño moderno sin instalar nada -->
+    <script src="https://tailwindcss.com"></script>
+    <style>
+        /* Estilos aislados para evitar conflictos si se integra en otra app */
+        .ai-custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .ai-custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .ai-custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        .ai-glow {
+            box-shadow: 0 0 20px rgba(147, 51, 234, 0.2);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col justify-between m-0 p-0 selection:bg-purple-500 selection:text-white">
+
+    <!-- Encabezado / Navbar -->
+    <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+        <div class="flex items-center space-x-3">
+            <div class="w-3 h-3 bg-emerald-400 rounded-full animate-pulse"></div>
+            <h1 class="text-xl font-bold tracking-tight bg-gradient-to-r from-purple-400 to-indigo-400 bg-clip-text text-transparent">
+                Nexus AI
+            </h1>
+        </div>
+        <!-- Selector de Modelo aislado -->
+        <select id="modelSelector" class="bg-slate-800 text-sm rounded-lg border border-slate-700 px-3 py-1.5 focus:outline-none focus:border-purple-500 transition-colors">
+            <option value="gemini">Gemini 2.5 Flash</option>
+            <option value="perplexity">Perplexity Sonar</option>
+        </select>
+    </header>
+
+    <!-- Contenedor Principal de Mensajes -->
+    <main id="chatContainer" class="flex-1 overflow-y-auto px-4 md:px-8 py-6 space-y-6 max-w-4xl w-full mx-auto ai-custom-scrollbar">
+        <!-- Mensaje de bienvenida del sistema -->
+        <div class="flex items-start gap-4 p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80">
+            <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-sm font-bold shadow-md">
+                AI
+            </div>
+            <div class="flex-1 space-y-1">
+                <p class="text-sm font-medium text-purple-400">Asistente Virtual</p>
+                <p class="text-slate-300 text-sm md:text-base leading-relaxed">
+                    Hola. Estoy listo para ayudarte utilizando la tecnología de Gemini o Perplexity. ¿Qué deseas consultar hoy?
+                </p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Zona del Input de Texto -->
+    <footer class="p-4 md:p-6 bg-gradient-to-t from-slate-950 via-slate-950 to-transparent sticky bottom-0">
+        <div class="max-w-4xl mx-auto w-full">
+            <form id="chatForm" class="relative flex items-center rounded-2xl border border-slate-800 bg-slate-900/80 backdrop-blur-md px-4 py-3 ai-glow focus-within:border-purple-500 transition-all duration-300">
+                <textarea 
+                    id="userInput"
+                    rows="1"
+                    placeholder="Pregúntame lo que quieras..." 
+                    class="w-full bg-transparent resize-none outline-none pr-12 text-sm md:text-base text-slate-100 placeholder-slate-500 ai-custom-scrollbar max-h-32"
+                    required
+                ></textarea>
+                <button 
+                    type="submit" 
+                    class="absolute right-3 p-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl transition-all duration-200 shadow-lg shadow-purple-900/30 active:scale-95 flex items-center justify-center"
+                >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://w3.org">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+                    </svg>
+                </button>
+            </form>
+            <p class="text-center text-xs text-slate-600 mt-2">
+                Interfaz modular aislada. Las llamadas se procesan de forma asíncrona.
+            </p>
+        </div>
+    </footer>
+
+    <!-- Lógica de la interfaz aislada para evitar colisiones de variables -->
+    <script>
+        (function() {
+            const chatForm = document.getElementById('chatForm');
+            const userInput = document.getElementById('userInput');
+            const chatContainer = document.getElementById('chatContainer');
+            const modelSelector = document.getElementById('modelSelector');
+
+            // Ajuste automático de altura para el textarea
+            userInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = (this.scrollHeight) + 'px';
+            });
+
+            // Función para renderizar burbujas de chat de forma segura
+            function appendMessage(sender, text, isUser = false) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `flex items-start gap-4 p-4 rounded-2xl transition-all duration-300 ${
+                    isUser 
+                    ? 'bg-slate-800/40 border border-slate-700/50 flex-row-reverse' 
+                    : 'bg-slate-900/40 border border-slate-800/80'
+                }`;
+
+                const avatar = document.createElement('div');
+                avatar.className = `w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                    isUser 
+                    ? 'bg-slate-700 text-slate-200' 
+                    : 'bg-gradient-to-tr from-purple-600 to-indigo-600 text-white'
+                }`;
+                avatar.textContent = isUser ? 'TÚ' : 'AI';
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'flex-1 space-y-1';
+                
+                const label = document.createElement('p');
+                label.className = `text-sm font-medium ${isUser ? 'text-slate-400 text-right' : 'text-purple-400'}`;
+                label.textContent = sender;
+
+                const textParagraph = document.createElement('p');
+                textParagraph.className = 'text-slate-300 text-sm md:text-base leading-relaxed whitespace-pre-wrap';
+                textParagraph.textContent = text;
+
+                contentDiv.appendChild(label);
+                contentDiv.appendChild(textParagraph);
+                messageDiv.appendChild(avatar);
+                messageDiv.appendChild(contentDiv);
+                
+                chatContainer.appendChild(messageDiv);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+
+            // Manejo del evento de envío
+            chatForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const query = userInput.value.trim();
+                const selectedModel = modelSelector.value;
+                if (!query) return;
+
+                // 1. Mostrar mensaje del usuario
+                appendMessage('Tú', query, true);
+                userInput.value = '';
+                userInput.style.height = 'auto';
+
+                // 2. Mostrar indicador de "Pensando..." temporal
+                const thinkingDiv = document.createElement('div');
+                thinkingDiv.className = 'text-sm text-slate-500 italic animate-pulse pl-12';
+                thinkingDiv.id = 'ai-thinking';
+                thinkingDiv.textContent = `Nexus AI está consultando con ${selectedModel}...`;
+                chatContainer.appendChild(thinkingDiv);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+
+                try {
+                    // Aquí conectarías con tu backend (Flask / FastAPI) que ejecuta tus scripts anteriores
+                    // Ejemplo: const response = await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ query, model: selectedModel }) });
+                    
+                    // Simulación de respuesta para pruebas locales inmediatas:
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    // Eliminar indicador de carga
+                    document.getElementById('ai-thinking').remove();
+
+                    // Renderizar respuesta simulada exitosa
+                    appendMessage(
+                        selectedModel === 'gemini' ? 'Gemini 2.5' : 'Perplexity Sonar',
+                        `Recibí tu consulta sobre: "${query}". (Para ver respuestas reales, conecta este frontend con tu servidor de Python).`
+                    );
+
+                } catch (error) {
+                    if(document.getElementById('ai-thinking')) document.getElementById('ai-thinking').remove();
+                    appendMessage('Sistema', 'Error de conexión al procesar la solicitud.', false);
+                }
+            });
+        })();
+    </script>
+</body>
+</html>
