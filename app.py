@@ -32,6 +32,7 @@ import external_resources
 from tool_runtime import ToolRuntime, safe_calculate
 from creative_runtime import creative_api, _authorized as _founder_authorized, save_founder_proposal
 from shared_identity import identity_api, init_identity_schema
+from task_quality import build_delivery_report
 
 logger = logging.getLogger(__name__)
 BASE = Path(__file__).resolve().parent
@@ -1217,6 +1218,14 @@ def execute_unified():
     plan = [{"step_id": step.step_id, "name": step.name, "handler_key": step.handler_key}
             for step in result.plan.steps] if result.plan else []
     events = loop.executor.engine.store.list_events(task.task_id)
+    verification = result.verification or {"status": task.status.value}
+    delivery_report = build_delivery_report(
+        task_status=task.status.value,
+        plan=plan,
+        events=events,
+        artifacts=task.artifacts,
+        verification=verification,
+    )
     body = {
         "ok": task.status.value == "succeeded",
         "kind": "task",
@@ -1227,7 +1236,8 @@ def execute_unified():
         "task": task.to_dict(),
         "plan": plan,
         "events": events,
-        "verification": result.verification or {"status": task.status.value},
+        "verification": verification,
+        "delivery_report": delivery_report,
         "execution_status": task.status.value,
         "plan_review": result.plan_review,
         "runtime": {"steps_planned": len(plan), "steps_completed": sum(e["event_type"] == "step_succeeded" for e in events)},
@@ -1270,7 +1280,12 @@ def create_task():
         return jsonify({"error": "El objetivo supera el límite de 10.000 caracteres."}), 400
     task_request = TaskRequest(goal=goal.strip(), constraints=["No afirmar que se han usado modelos o fuentes que no están configurados."], success_criteria=[CRITERION])
     result = loop.run(task_request, namespace="prototype")
-    return jsonify({"task": result.task.to_dict(), "task_access_token": _task_access_token(result.task.task_id), "plan": [{"step_id": s.step_id, "name": s.name, "handler_key": s.handler_key} for s in result.plan.steps] if result.plan else [], "verification": result.verification, "plan_review": result.plan_review}), 201
+    task = result.task
+    plan = [{"step_id": s.step_id, "name": s.name, "handler_key": s.handler_key} for s in result.plan.steps] if result.plan else []
+    events = loop.executor.engine.store.list_events(task.task_id)
+    verification = result.verification or {"status": task.status.value}
+    delivery_report = build_delivery_report(task_status=task.status.value, plan=plan, events=events, artifacts=task.artifacts, verification=verification)
+    return jsonify({"task": task.to_dict(), "task_access_token": _task_access_token(task.task_id), "plan": plan, "events": events, "verification": verification, "plan_review": result.plan_review, "delivery_report": delivery_report}), 201
 
 @app.get("/api/tasks/<task_id>")
 def get_task(task_id):
