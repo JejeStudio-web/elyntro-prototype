@@ -106,7 +106,32 @@ class CognitiveLoop:
         # Idempotent re-submission returns the existing task; never silently rerun it.
         existing_events = self.engine.store.list_events(task.task_id)
         if any(e["event_type"] == "cognitive_loop_started" for e in existing_events):
-            return self._result_for_existing(task.task_id)
+            state = task.metadata.get(self.PLAN_METADATA_KEY, {})
+            persisted_plan = state.get("plan") if isinstance(state, dict) else None
+            if task.status in {TaskStatus.RUNNING, TaskStatus.READY} and isinstance(persisted_plan, dict):
+                # The executor resumes from durable step_result_committed events.
+                # Completed steps are reused; only steps without a committed result run again.
+                plan = self._deserialize_plan(persisted_plan)
+                steps = plan.to_task_steps(self.tools)
+                task = self.executor.execute(task.task_id, steps)
+                return self._finish_result(task, plan, state.get("memory_context", []))
+            if task.status in {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED,
+                               TaskStatus.NEEDS_APPROVAL}:
+                return self._result_for_existing(task.task_id)
+            # Planning was interrupted before a complete plan was committed. Do not
+            # guess which partial planning side effects occurred or loop forever.
+            latest = self.engine.store.get_task(task.task_id)
+            try:
+                failed = self.engine.fail(
+                    task.task_id,
+                    "Execution interrupted before a resumable plan was committed; submit a new task to re-plan safely.",
+                )
+                self.engine.store.add_event(task.task_id, "recovery_stopped", {
+                    "reason": "plan_not_committed", "previous_status": latest.status.value,
+                })
+                return self._finish_result(failed, self._load_plan(failed), state.get("memory_context", []))
+            except Exception:
+                return self._result_for_existing(task.task_id)
 
         memories: list[dict[str, Any]] = []
         if self.memory is not None:
