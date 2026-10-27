@@ -433,8 +433,7 @@ background_queue = DurableTaskQueue(
     lease_seconds=int(os.environ.get("ELYNTRO_TASK_LEASE_SECONDS", "180")),
     max_recoveries=int(os.environ.get("ELYNTRO_TASK_MAX_RECOVERIES", "5")),
 )
-if os.environ.get("ELYNTRO_BACKGROUND_WORKER", "true").strip().casefold() not in {"0", "false", "no", "off"}:
-    background_queue.start()
+background_queue.start()
 
 
 def _enqueue_task(goal: str, *, constraints: list[str], success_criteria: list[str],
