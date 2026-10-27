@@ -1,0 +1,87 @@
+import express from 'express';
+import fetch from 'node-fetch';
+
+const app = express();
+app.use(express.json());
+
+// --- FUNCIÓN 1: EL REDACTOR DE IA (Usa un modelo público sin clave) ---
+app.post('/api/ia-redactar', async (req, res) => {
+    try {
+        const { pregunta } = req.body;
+        
+        // Conexión directa a una API de IA abierta y gratuita
+        const respuesta = await fetch("https://openrouter.ai", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                "model": "meta-llama/llama-3-8b-instruct:free", // Modelo 100% gratuito
+                "messages": [{"role": "user", "content": pregunta}]
+            })
+        });
+
+        const datos = await respuesta.json();
+        res.json({ 
+            exito: true, 
+            respuesta_ia: datos.choices[0].message.content 
+        });
+    } catch (error) {
+        res.status(500).json({ exito: false, error: "Error en la IA externa" });
+    }
+});
+
+// --- FUNCIÓN 2: BUSCADOR DE WIKIPEDIA (Datos reales en tiempo real) ---
+app.post('/api/buscar-wiki', async (req, res) => {
+    try {
+        const { termino } = req.body;
+        
+        // Conexión directa a la API libre de Wikipedia en español
+        const url = `https://wikipedia.org{encodeURIComponent(termino)}&format=json&origin=*`;
+        const respuesta = await fetch(url);
+        const datos = await respuesta.json();
+        
+        const resultados = datos.query.search.map(item => ({
+            titulo: item.title,
+            resumen: item.snippet.replace(/<[^>]*>/g, ''), // Limpia el código HTML
+            enlace: `https://wikipedia.org{encodeURIComponent(item.title)}`
+        }));
+
+        res.json({ exito: true, resultados });
+    } catch (error) {
+        res.status(500).json({ exito: false, error: "Error al buscar en Wikipedia" });
+    }
+});
+
+// --- FUNCIÓN 3: CLIMA MUNDIAL EN VIVO (Sin registros) ---
+app.post('/api/clima', async (req, res) => {
+    try {
+        const { ciudad } = req.body;
+        
+        // API pública de geolocalización + clima libre
+        const geoRes = await fetch(`https://open-meteo.com{encodeURIComponent(ciudad)}&count=1&language=es`);
+        const geoDatos = await geoRes.json();
+        
+        if (!geoDatos.results || geoDatos.results.length === 0) {
+            return res.status(404).json({ exito: false, error: "Ciudad no encontrada" });
+        }
+
+        const { latitude, longitude, name } = geoDatos.results[0];
+        const climaRes = await fetch(`https://open-meteo.com{latitude}&longitude=${longitude}&current_weather=true`);
+        const climaDatos = await climaRes.json();
+
+        res.json({
+            exito: true,
+            ciudad: name,
+            temperatura: `${climaDatos.current_weather.temperature}°C`,
+            viento: `${climaDatos.current_weather.windspeed} km/h`
+        });
+    } catch (error) {
+        res.status(500).json({ exito: false, error: "Error al obtener el clima" });
+    }
+});
+
+// Iniciar el servidor en el puerto 3000
+app.listen(3000, () => {
+    console.log("🚀 Tu API con recursos externos gratuitos está activa en el puerto 3000");
+});
