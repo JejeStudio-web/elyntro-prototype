@@ -169,8 +169,8 @@ def test_quick_chat_stream_returns_sse_delta_frames(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *args): return False
         def __iter__(self):
-            yield b'data: {"choices":[{"delta":{"content":"Hola"}}]}\\n'
-            yield b'data: [DONE]\\n'
+            yield b'data: {"choices":[{"delta":{"content":"Hola"}}]}\n'
+            yield b'data: [DONE]\n'
 
     seen = {}
     def fake_urlopen(request, timeout):
