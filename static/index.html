@@ -340,6 +340,7 @@
     .footnote { line-height:1.6; }
     .result-card { padding:16px; border-radius:15px; }
     .generated-media { display:block; max-width:100%; max-height:70vh; border-radius:16px; margin:14px 0; border:1px solid var(--line); }
+    .quick-mode-active { border-color:var(--accent-strong); background:#8797ff24; }
     audio.generated-media { width:min(520px,100%); max-height:none; }
     #media-attachment { max-width:100%; overflow-wrap:anywhere; }
     .result-card h3 { font-size:13px; }
@@ -472,6 +473,7 @@
               <div class="composer-tools">
                 <button class="attach-button" id="attach-file" type="button">＋ Texto</button>
                 <button class="attach-button" id="attach-media" type="button">Imagen / PDF / audio</button>
+                <button class="attach-button" id="quick-mode" type="button" aria-pressed="false">Respuesta rápida: no</button>
                 <button class="attach-button" id="generate-image" type="button">Crear imagen</button>
                 <button class="attach-button" id="generate-video" type="button">Crear vídeo</button>
                 <button class="attach-button voice-button" id="voice-input" type="button" title="Dictado por voz si el navegador lo admite">Dictar</button>
@@ -519,6 +521,7 @@
     let busy = false;
     let attachedText = null;
     let attachedMedia = [];
+    let quickMode = false;
     let mediaCapabilities = {};
     let activeController = null;
     let stopRequestedByUser = false;
@@ -831,6 +834,7 @@
     async function submitPrompt(value) {
       const prompt = value.trim();
       if (busy || !prompt) return;
+      const hasTextAttachment = Boolean(attachedText);
       let fullPrompt = attachedText
         ? `${prompt}\n\n--- Archivo adjunto: ${attachedText.name} ---\n${attachedText.content}\n--- Fin del archivo adjunto ---`
         : prompt;
@@ -870,6 +874,54 @@
         if (String(fullPrompt).startsWith("[245jg&]")) {
           const creatorToken = sessionStorage.getItem("elyntro_founder_token") || "";
           if (creatorToken) requestHeaders["X-Elyntro-Founder-Token"] = creatorToken;
+        }
+        const useQuickStream = quickMode && !hasTextAttachment && currentMedia.length === 0;
+        if (useQuickStream) {
+          const streamResponse = await fetch("/api/chat/stream", {
+            method: "POST", headers: requestHeaders, credentials: "same-origin",
+            body: JSON.stringify({ goal: fullPrompt, history: requestHistory }), signal: controller.signal,
+          });
+          if (!streamResponse.ok) {
+            const failure = await responseJson(streamResponse);
+            throw new Error(failure.error || "No se pudo iniciar la respuesta en directo.");
+          }
+          if (!streamResponse.body) throw new Error("El navegador no permite leer respuestas en streaming.");
+          pending.article.querySelector(".message-head span:last-child").textContent = "Respuesta en directo";
+          let streamedAnswer = "";
+          const reader = streamResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let streamFinished = false;
+          while (!streamFinished) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            const frames = buffer.split("\n\n");
+            buffer = frames.pop() || "";
+            for (const frame of frames) {
+              const line = frame.split("\n").find(part => part.startsWith("data:"));
+              if (!line) continue;
+              let event;
+              try { event = JSON.parse(line.slice(5).trim()); } catch { continue; }
+              if (event.type === "delta" && typeof event.text === "string") {
+                streamedAnswer += event.text;
+                renderMarkdown(pending.body, streamedAnswer);
+                $("status").textContent = "Generando respuesta en directo…";
+              } else if (event.type === "meta") {
+                pending.article.querySelector(".message-head span:last-child").textContent = "En directo · " + (event.model || "modelo");
+              } else if (event.type === "error") {
+                throw new Error(event.message || "El streaming se interrumpió.");
+              } else if (event.type === "done") streamFinished = true;
+            }
+          }
+          if (!streamedAnswer.trim()) throw new Error("El proveedor no generó contenido textual.");
+          renderMarkdown(pending.body, streamedAnswer);
+          addResponseActions(pending.article, prompt, streamedAnswer);
+          history.push({ role: "assistant", content: streamedAnswer });
+          while (history.length > 40) history.shift();
+          saveHistory();
+          $("status").textContent = "Respuesta recibida en directo. Este modo no ejecuta herramientas ni investigación web.";
+          return;
         }
         let requestUrl = "/api/agent/execute";
         let requestPayload = { goal: fullPrompt, history: requestHistory, async: true };
@@ -1235,6 +1287,15 @@
       $("theme-toggle").textContent = theme === "light" ? "Cambiar a oscuro" : "Cambiar a claro";
     });
 
+    $("quick-mode").addEventListener("click", () => {
+      quickMode = !quickMode;
+      $("quick-mode").setAttribute("aria-pressed", String(quickMode));
+      $("quick-mode").textContent = "Respuesta rápida: " + (quickMode ? "sí" : "no");
+      $("quick-mode").classList.toggle("quick-mode-active", quickMode);
+      $("status").textContent = quickMode
+        ? "Modo rápido activo: transmite texto en directo, sin herramientas. Desactívalo para usar el enrutador automático."
+        : "Modo automático activo: Elyntro decide entre respuesta directa, herramientas y tareas.";
+    });
     $("attach-media").addEventListener("click", () => $("media-input").click());
     $("media-input").addEventListener("change", () => {
       const files = Array.from($("media-input").files || []);
