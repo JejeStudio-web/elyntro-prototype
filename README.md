@@ -80,6 +80,21 @@ Configuration:
 
 Recovery is **at-least-once**, not exactly-once: a process can stop after an external side effect but before committing its step result. Handlers that mutate external state must be idempotent or use the engine's `OperationJournal`; ambiguous journal outcomes require reconciliation rather than blind replay. The queue does not provide process isolation or forcibly terminate a stuck Python handler. A persistent disk is required on Render; the current blueprint does not provision one automatically.
 
+## Multimodal inputs, tools, and media adapters
+
+The first-party UI accepts up to five text files (8 KB combined) and up to five image/PDF/audio attachments (650 KB combined). `POST /api/multimodal/analyze` accepts PNG/JPEG/WebP data URLs encoded as base64, PDFs (text extraction only, up to 20 pages), and UTF-8 text files. Image understanding depends on whether the configured chat model supports vision. Scanned PDFs without selectable text are rejected; OCR is not implied. `POST /api/multimodal/transcribe` sends bounded audio uploads to the configured OpenAI-compatible `/audio/transcriptions` endpoint; the default model is `whisper-large-v3-turbo` for Groq and `whisper-1` otherwise, overridable with `ELYNTRO_TRANSCRIPTION_MODEL`.
+
+`GET /api/media/capabilities` reports media providers configured on the server. Image generation uses `POST /api/media/generate-image` with an OpenAI-compatible `/images/generations` endpoint; speech generation uses `POST /api/media/generate-speech` with `/audio/speech`; video generation uses a provider adapter exposing `POST /videos` and `GET /videos/{id}`. These adapters are unavailable until configured and are not universal protocols. Environment variables:
+- Image: `ELYNTRO_IMAGE_API_BASE_URL`, `ELYNTRO_IMAGE_API_KEY`, `ELYNTRO_IMAGE_MODEL` (falls back to `OPENAI_API_KEY` and OpenAI's base URL).
+- Speech: `ELYNTRO_TTS_API_BASE_URL`, `ELYNTRO_TTS_API_KEY`, `ELYNTRO_TTS_MODEL` (same OpenAI fallback).
+- Video: `ELYNTRO_VIDEO_API_BASE_URL`, `ELYNTRO_VIDEO_API_KEY`, `ELYNTRO_VIDEO_MODEL`; this adapter assumes the provider's create/status paths follow the stated contract.
+
+The authenticated OpenAI-compatible `POST /api/v1/chat/completions` endpoint supports bounded function calling for the explicit allowlist `calculate`, `web_search`, and `web_open`. It executes at most four model/tool rounds, rejects other tool names, and does not support streaming and tool execution in the same request yet. Web search requires the configured search provider; web open is limited to public HTTP(S) URLs and blocks unsafe destinations. This is not arbitrary shell or unrestricted computer access.
+
+The first-party UI also exposes an optional **quick answer** mode using `POST /api/chat/stream` and Server-Sent Events (SSE). It streams text directly and explicitly does not execute tools or web research; automatic mode remains the default and keeps the planner/tool/task routing.
+
+Long-running work continues to use Elyntro's durable task queue and task status API. The model/tool loop, multimodal analysis, and media generation are distinct execution paths with different capabilities; a successful API response is not by itself independent factual verification. Provider-specific features must be tested against the exact configured model before being advertised as available.
+
 ## Run locally
 
 ```bash

@@ -339,6 +339,10 @@
     .statusline { padding:8px 7px 0; }
     .footnote { line-height:1.6; }
     .result-card { padding:16px; border-radius:15px; }
+    .generated-media { display:block; max-width:100%; max-height:70vh; border-radius:16px; margin:14px 0; border:1px solid var(--line); }
+    .quick-mode-active { border-color:var(--accent-strong); background:#8797ff24; }
+    audio.generated-media { width:min(520px,100%); max-height:none; }
+    #media-attachment { max-width:100%; overflow-wrap:anywhere; }
     .result-card h3 { font-size:13px; }
     .delivery-step { padding:12px 0; }
     button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible { outline:2px solid var(--accent-strong); outline-offset:3px; }
@@ -467,15 +471,21 @@
           <form id="composer-form">
             <div class="composer">
               <div class="composer-tools">
-                <button class="attach-button" id="attach-file" type="button">＋ Adjuntar archivos</button>
+                <button class="attach-button" id="attach-file" type="button">＋ Texto</button>
+                <button class="attach-button" id="attach-media" type="button">Imagen / PDF / audio</button>
+                <button class="attach-button" id="quick-mode" type="button" aria-pressed="false">Respuesta rápida: no</button>
+                <button class="attach-button" id="generate-image" type="button">Crear imagen</button>
+                <button class="attach-button" id="generate-video" type="button">Crear vídeo</button>
                 <button class="attach-button voice-button" id="voice-input" type="button" title="Dictado por voz si el navegador lo admite">Dictar</button>
                 <button class="attach-button" id="stop-request" type="button" hidden>Detener</button>
                 <input id="file-input" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" multiple hidden>
+                <input id="media-input" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,audio/*" multiple hidden>
                 <span id="attachment" aria-live="polite"></span>
+                <span id="media-attachment" aria-live="polite"></span>
               </div>
               <textarea id="prompt" maxlength="10000" rows="2" placeholder="Escribe lo que necesitas…" aria-label="Tu petición" required></textarea>
               <div class="composer-bottom">
-                <span class="composer-note">Archivos de texto .txt/.md/.csv/.json · hasta 5 archivos, 8 KB en total</span>
+                <span class="composer-note">Texto hasta 8 KB; imágenes, PDF y audio hasta 650 KB combinados. Las funciones multimedia dependen del proveedor configurado.</span>
                 <button class="send" id="send" type="submit">Ejecutar
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
                 </button>
@@ -510,8 +520,25 @@
     const THEME_KEY = "elyntro.theme.v1";
     let busy = false;
     let attachedText = null;
+    let attachedMedia = [];
+    let quickMode = false;
+    let mediaCapabilities = {};
     let activeController = null;
     let stopRequestedByUser = false;
+
+    function fileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("No se pudo leer " + file.name));
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          const comma = result.indexOf(",");
+          if (comma < 0) reject(new Error("No se pudo codificar " + file.name));
+          else resolve(result.slice(comma + 1));
+        };
+        reader.readAsDataURL(file);
+      });
+    }
 
     function element(tag, className, text) {
       const node = document.createElement(tag);
@@ -807,9 +834,12 @@
     async function submitPrompt(value) {
       const prompt = value.trim();
       if (busy || !prompt) return;
-      const fullPrompt = attachedText
+      const hasTextAttachment = Boolean(attachedText);
+      let fullPrompt = attachedText
         ? `${prompt}\n\n--- Archivo adjunto: ${attachedText.name} ---\n${attachedText.content}\n--- Fin del archivo adjunto ---`
         : prompt;
+      const currentMedia = attachedMedia.slice();
+      const mediaNames = currentMedia.map(item => item.file.name);
       if (fullPrompt.length > 10000) {
         $("status").textContent = "La petición y el archivo superan los 10.000 caracteres. Reduce el archivo o divide la tarea.";
         return;
@@ -821,15 +851,18 @@
       $("stop-request").hidden = false;
       $("status").textContent = "Solicitud enviada. Preparando ejecución y seguimiento del progreso…";
       const requestHistory = history.slice(-10);
-      addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo adjunto: ${attachedText.name}]` : ""));
+      addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo de texto: ${attachedText.name}]` : "") + (mediaNames.length ? `\n[Adjuntos multimedia: ${mediaNames.join(", ")}]` : ""));
       // The attachment content is sent only in the current request; never persist it in local history.
       const storedUserMessage = prompt + (attachedText
         ? `\n[Archivo adjunto: ${attachedText.name}; contenido no guardado en el historial]`
         : "");
       history.push({ role: "user", content: storedUserMessage });
       attachedText = null;
+      attachedMedia = [];
       $("attachment").replaceChildren();
+      $("media-attachment").replaceChildren();
       $("file-input").value = "";
+      $("media-input").value = "";
       while (history.length > 40) history.shift();
       saveHistory();
       const pending = addMessage("assistant", "En curso", "Esperando respuesta de la API…");
@@ -842,12 +875,84 @@
           const creatorToken = sessionStorage.getItem("elyntro_founder_token") || "";
           if (creatorToken) requestHeaders["X-Elyntro-Founder-Token"] = creatorToken;
         }
-        const response = await fetch("/api/agent/execute", {
-          method: "POST",
-          headers: requestHeaders,
-          credentials: "same-origin",
-          body: JSON.stringify({ goal: fullPrompt, history: requestHistory, async: true }),
-          signal: controller.signal,
+        const useQuickStream = quickMode && !hasTextAttachment && currentMedia.length === 0;
+        if (useQuickStream) {
+          const streamResponse = await fetch("/api/chat/stream", {
+            method: "POST", headers: requestHeaders, credentials: "same-origin",
+            body: JSON.stringify({ goal: fullPrompt, history: requestHistory }), signal: controller.signal,
+          });
+          if (!streamResponse.ok) {
+            const failure = await responseJson(streamResponse);
+            throw new Error(failure.error || "No se pudo iniciar la respuesta en directo.");
+          }
+          if (!streamResponse.body) throw new Error("El navegador no permite leer respuestas en streaming.");
+          pending.article.querySelector(".message-head span:last-child").textContent = "Respuesta en directo";
+          let streamedAnswer = "";
+          const reader = streamResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let streamFinished = false;
+          while (!streamFinished) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            const frames = buffer.split("\n\n");
+            buffer = frames.pop() || "";
+            for (const frame of frames) {
+              const line = frame.split("\n").find(part => part.startsWith("data:"));
+              if (!line) continue;
+              let event;
+              try { event = JSON.parse(line.slice(5).trim()); } catch { continue; }
+              if (event.type === "delta" && typeof event.text === "string") {
+                streamedAnswer += event.text;
+                renderMarkdown(pending.body, streamedAnswer);
+                $("status").textContent = "Generando respuesta en directo…";
+              } else if (event.type === "meta") {
+                pending.article.querySelector(".message-head span:last-child").textContent = "En directo · " + (event.model || "modelo");
+              } else if (event.type === "error") {
+                throw new Error(event.message || "El streaming se interrumpió.");
+              } else if (event.type === "done") streamFinished = true;
+            }
+          }
+          if (!streamedAnswer.trim()) throw new Error("El proveedor no generó contenido textual.");
+          renderMarkdown(pending.body, streamedAnswer);
+          addResponseActions(pending.article, prompt, streamedAnswer);
+          history.push({ role: "assistant", content: streamedAnswer });
+          while (history.length > 40) history.shift();
+          saveHistory();
+          $("status").textContent = "Respuesta recibida en directo. Este modo no ejecuta herramientas ni investigación web.";
+          return;
+        }
+        let requestUrl = "/api/agent/execute";
+        let requestPayload = { goal: fullPrompt, history: requestHistory, async: true };
+        const audioFiles = currentMedia.filter(item => item.file.type.startsWith("audio/") || /\\.(wav|mp3|m4a|mp4|mpeg|mpga|webm|ogg|flac)$/i.test(item.file.name));
+        for (const item of audioFiles) {
+          const form = new FormData();
+          form.append("file", item.file, item.file.name);
+          const transcriptResponse = await fetch("/api/multimodal/transcribe", {
+            method: "POST", body: form, credentials: "same-origin", signal: controller.signal
+          });
+          const transcriptData = await responseJson(transcriptResponse);
+          if (!transcriptResponse.ok || !transcriptData.ok) throw new Error(transcriptData.error || "No se pudo transcribir el audio.");
+          fullPrompt += `\n\n--- Transcripción de ${item.file.name} ---\n${transcriptData.text}\n--- Fin de la transcripción ---`;
+        }
+        if (fullPrompt.length > 10000) throw new Error("La transcripción y el mensaje superan 10.000 caracteres.");
+        const visualFiles = currentMedia.filter(item => !audioFiles.includes(item));
+        if (visualFiles.length && fullPrompt.length > 8000) throw new Error("Para analizar imágenes o PDF, el texto de la petición debe ocupar como máximo 8.000 caracteres.");
+        if (visualFiles.length) {
+          const encodedAttachments = [];
+          for (const item of visualFiles) encodedAttachments.push({
+            name: item.file.name, mime_type: item.file.type || "application/octet-stream",
+            data_base64: await fileAsBase64(item.file)
+          });
+          requestUrl = "/api/multimodal/analyze";
+          requestPayload = { goal: fullPrompt, attachments: encodedAttachments };
+        } else {
+          requestPayload.goal = fullPrompt;
+        }
+        const response = await fetch(requestUrl, {
+          method: "POST", headers: requestHeaders, credentials: "same-origin",
+          body: JSON.stringify(requestPayload), signal: controller.signal,
         });
         let data = await responseJson(response);
         if (!response.ok) {
@@ -941,6 +1046,19 @@
       const bar = element("div", "response-actions");
       const make = (label, action) => { const b = element("button", "", label); b.type = "button"; b.addEventListener("click", action); bar.append(b); return b; };
       make("Regenerar", () => submitPrompt(originalPrompt));
+      const speakButton = make("Leer en voz alta", async () => {
+        try {
+          $("status").textContent = "Generando audio…";
+          const response = await fetch("/api/media/generate-speech", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ text: answer.slice(0, 5000) }) });
+          const data = await responseJson(response);
+          if (!response.ok || !data.ok) throw new Error(data.error || "Síntesis de voz no disponible.");
+          const audio = element("audio", "generated-media"); audio.controls = true;
+          audio.src = "data:" + data.media_type + ";base64," + data.data_base64; article.append(audio);
+          $("status").textContent = "Audio generado por el proveedor configurado.";
+        } catch (error) { $("status").textContent = error.message; }
+      });
+      speakButton.classList.add("speak-response");
+      speakButton.disabled = mediaCapabilities.speech_generation ? !mediaCapabilities.speech_generation.available : false;
       make("Más simple", () => submitPrompt("Reexplica con palabras más sencillas y un ejemplo breve.\n\nPregunta: " + originalPrompt + "\n\nRespuesta anterior:\n" + answer));
       make("Ampliar", () => submitPrompt("Amplía la respuesta con más profundidad y matices importantes.\n\nPregunta: " + originalPrompt + "\n\nRespuesta anterior:\n" + answer));
       make("Ejemplos", () => submitPrompt("Añade 3 ejemplos concretos sobre la respuesta anterior.\n\nPregunta: " + originalPrompt + "\n\nRespuesta:\n" + answer));
@@ -1170,7 +1288,84 @@
       $("theme-toggle").textContent = theme === "light" ? "Cambiar a oscuro" : "Cambiar a claro";
     });
 
-    $("attach-file").addEventListener("click", () => $("file-input").click());
+    $("quick-mode").addEventListener("click", () => {
+      quickMode = !quickMode;
+      $("quick-mode").setAttribute("aria-pressed", String(quickMode));
+      $("quick-mode").textContent = "Respuesta rápida: " + (quickMode ? "sí" : "no");
+      $("quick-mode").classList.toggle("quick-mode-active", quickMode);
+      $("status").textContent = quickMode
+        ? "Modo rápido activo: transmite texto en directo, sin herramientas. Desactívalo para usar el enrutador automático."
+        : "Modo automático activo: Elyntro decide entre respuesta directa, herramientas y tareas.";
+    });
+    $("attach-media").addEventListener("click", () => $("media-input").click());
+    $("media-input").addEventListener("change", () => {
+      const files = Array.from($("media-input").files || []);
+      if (!files.length) return;
+      const combined = [...attachedMedia.map(item => item.file), ...files];
+      const total = combined.reduce((sum, file) => sum + file.size, 0);
+      if (combined.length > 5) { $("status").textContent = "Puedes adjuntar hasta cinco archivos multimedia."; $("media-input").value = ""; return; }
+      if (total > 650000) { $("status").textContent = "El total multimedia supera 650 KB. Reduce el tamaño de los archivos."; $("media-input").value = ""; return; }
+      const accepted = files.every(file => file.type === "application/pdf" || ["image/png","image/jpeg","image/webp"].includes(file.type) || file.type.startsWith("audio/"));
+      if (!accepted) { $("status").textContent = "Formato no compatible. Usa PNG, JPEG, WebP, PDF o audio."; $("media-input").value = ""; return; }
+      attachedMedia = combined.map(file => ({ file }));
+      const chip = element("span", "attachment-chip", `${attachedMedia.length} archivo(s) multimedia · ${total.toLocaleString()} B`);
+      const names = element("span", "", attachedMedia.map(item => item.file.name).join(", "));
+      const remove = element("button", "", "×");
+      remove.type = "button";
+      remove.setAttribute("aria-label", "Quitar adjuntos multimedia");
+      remove.addEventListener("click", () => { attachedMedia = []; $("media-attachment").replaceChildren(); $("media-input").value = ""; });
+      chip.append(names, remove);
+      $("media-attachment").replaceChildren(chip);
+      $("status").textContent = "Archivos listos. Las imágenes requieren un modelo con visión; el audio requiere un proveedor de transcripción.";
+    });
+
+    async function generateMedia(kind) {
+      const prompt = $("prompt").value.trim();
+      if (!prompt) { $("status").textContent = "Describe primero qué quieres generar."; $("prompt").focus(); return; }
+      if (busy) return;
+      busy = true; $("send").disabled = true;
+      const endpoint = kind === "image" ? "/api/media/generate-image" : "/api/media/generate-video";
+      const pending = addMessage("assistant", kind === "image" ? "Generando imagen" : "Solicitando vídeo", prompt);
+      try {
+        const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ prompt }) });
+        const data = await responseJson(response);
+        if (!response.ok || !data.ok) throw new Error(data.error || "El proveedor multimedia no pudo completar la solicitud.");
+        if (kind === "image") {
+          const img = element("img", "generated-media");
+          img.alt = "Imagen generada por Elyntro"; img.src = data.data_url || data.url; img.loading = "lazy";
+          pending.body.append(img);
+          $("status").textContent = "Imagen recibida del proveedor configurado.";
+        } else {
+          const card = addCard(pending.body, "Estado de generación de vídeo");
+          card.append(element("p", "", "Identificador: " + data.video_id));
+          const statusText = element("p", "artifact-meta", "Estado inicial: " + (data.status || "enviado"));
+          card.append(statusText);
+          for (let i = 0; i < 60; i++) {
+            await new Promise(resolve => window.setTimeout(resolve, 5000));
+            const check = await fetch("/api/media/videos/" + encodeURIComponent(data.video_id), { credentials: "same-origin" });
+            const current = await responseJson(check);
+            if (!check.ok || !current.ok) throw new Error(current.error || "No se pudo consultar el vídeo.");
+            const video = current.video || {};
+            statusText.textContent = "Estado: " + (video.status || "sin estado comunicado") + (video.progress != null ? " · " + video.progress + "%" : "");
+            if (["completed","succeeded","failed","cancelled","error"].includes(String(video.status).toLowerCase())) {
+              if (typeof video.output === "string" && video.output.startsWith("https://")) {
+                const link = element("a", "", "Abrir vídeo generado");
+                link.href = video.output; link.target = "_blank"; link.rel = "noopener noreferrer"; card.append(link);
+              }
+              break;
+            }
+          }
+          $("status").textContent = "Consulta de vídeo terminada. El estado y el enlace dependen del proveedor.";
+        }
+      } catch (error) {
+        pending.article.classList.add("error"); pending.body.append(element("p", "", error.message));
+        $("status").textContent = error.message;
+      } finally { busy = false; $("send").disabled = false; }
+    }
+    $("generate-image").addEventListener("click", () => generateMedia("image"));
+    $("generate-video").addEventListener("click", () => generateMedia("video"));
+
+        $("attach-file").addEventListener("click", () => $("file-input").click());
     $("file-input").addEventListener("change", async () => {
       const files = Array.from($("file-input").files || []);
       if (!files.length) return;
@@ -1278,6 +1473,28 @@
         $("model-label").textContent = "Proveedor sin comprobar";
       }
     }
+    async function checkMediaCapabilities() {
+      try {
+        const response = await fetch("/api/media/capabilities", { credentials: "same-origin" });
+        const data = await responseJson(response);
+        if (!response.ok || !data.ok) throw new Error("No se pudieron consultar las capacidades multimedia.");
+        mediaCapabilities = data.capabilities || {};
+        for (const [id, key] of [["generate-image","image_generation"],["generate-video","video_generation"]]) {
+          const button = $(id);
+          const capability = mediaCapabilities[key] || {};
+          button.disabled = !capability.available;
+          button.title = capability.available ? "Proveedor multimedia configurado" : "Función no configurada en el servidor";
+        }
+        document.querySelectorAll(".speak-response").forEach(button => {
+          button.disabled = !mediaCapabilities.speech_generation?.available;
+          button.title = button.disabled ? "La síntesis de voz no está configurada en el servidor" : "Generar audio de esta respuesta";
+        });
+      } catch {
+        $("generate-image").disabled = true;
+        $("generate-video").disabled = true;
+      }
+    }
+
     function csrfToken() {
       const match = document.cookie.match(/(?:^|; )elyntro_csrf=([^;]+)/);
       return match ? decodeURIComponent(match[1]) : "";
@@ -1417,6 +1634,7 @@
     restoreHistory();
     refreshIdentity();
     checkHealth();
+    checkMediaCapabilities();
   </script>
 </body>
 </html>
