@@ -223,3 +223,20 @@ def test_v1_model_pool_routes_to_selected_upstream(api_client, monkeypatch):
     assert response.get_json()["model"] == "reasoner"
     assert response.get_json()["elyntro"]["provider"] == "openai"
     assert seen == {"url": "https://api.openai.com/v1/chat/completions", "auth": "Bearer test-openai-key", "model": "gpt-4.1-mini"}
+
+
+def test_first_party_runtime_uses_same_primary_model_pool(api_client, monkeypatch):
+    import app as app_module
+    monkeypatch.setenv("ELYNTRO_MODEL_POOL", json.dumps([
+        {"id": "fast", "provider": "groq", "model": "llama-3.3-70b-versatile",
+         "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY"},
+        {"id": "reasoner", "provider": "openai", "model": "gpt-4.1-mini",
+         "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY", "primary": True},
+    ]))
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    config = app_module._model_provider_config()
+    assert config["provider"] == "openai"
+    assert config["model"] == "gpt-4.1-mini"
+    assert config["model_alias"] == "reasoner"
+    assert config["api_key"] == "test-openai-key"
