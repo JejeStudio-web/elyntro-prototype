@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.error
 import urllib.request
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from elyntro_api_v1 import api_v1, _model_pool
 from werkzeug.middleware.proxy_fix import ProxyFix
 from elyntro import CognitiveLoop, EvidenceVerifier
@@ -1445,6 +1445,79 @@ def multimodal_transcribe():
                         "provider": config["provider"]}), status
     except (urllib.error.URLError, TimeoutError, OSError, ValueError, UnicodeDecodeError):
         return jsonify({"ok": False, "error": "No se pudo completar la transcripción con el proveedor configurado."}), 502
+
+
+@app.post("/api/chat/stream")
+def direct_chat_stream():
+    """Stream a simple text answer over SSE; task/tool execution stays on the auto route."""
+    payload = request.get_json(silent=True) or {}
+    goal = payload.get("goal")
+    history = payload.get("history", [])
+    if not isinstance(goal, str) or not goal.strip() or len(goal) > 10000:
+        return jsonify({"ok": False, "error": "goal debe contener entre 1 y 10000 caracteres."}), 400
+    if not isinstance(history, list):
+        history = []
+    messages = [{"role": "system", "content": (
+        "Eres Elyntro. Responde en el idioma del usuario, con claridad, precisión y estructura útil. "
+        "Comprende lenguaje informal e intención implícita. No inventes hechos, fuentes, verificaciones ni acciones. "
+        "Separa hechos, inferencias y desconocidos; reconoce límites y cuestiona premisas débiles. "
+        "Este modo es una respuesta directa sin herramientas externas: no afirmes haber buscado en la web, ejecutado código ni creado archivos."
+    )}]
+    for item in history[-8:]:
+        if isinstance(item, dict) and item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str):
+            messages.append({"role": item["role"], "content": item["content"][:4000]})
+    messages.append({"role": "user", "content": goal.strip()})
+    config = _model_provider_config()
+    if not config.get("configured"):
+        return jsonify({"ok": False, "error": "El proveedor de modelos no está configurado."}), 503
+    body = {"model": config["model"], "messages": messages, "max_tokens": 2200, "temperature": 0.25, "stream": True}
+    upstream_request = urllib.request.Request(config["base_url"] + "/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "text/event-stream"}, method="POST")
+    if config.get("api_key"):
+        upstream_request.add_unredirected_header("Authorization", "Bearer " + config["api_key"])
+    try:
+        upstream = urllib.request.urlopen(upstream_request, timeout=60)
+    except urllib.error.HTTPError as exc:
+        status = 429 if exc.code == 429 else (503 if exc.code >= 500 else 502)
+        return jsonify({"ok": False, "error": f"El proveedor respondió HTTP {exc.code}.",
+                        "error_code": "provider_error"}), status
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return jsonify({"ok": False, "error": "No se pudo conectar con el proveedor de streaming."}), 502
+
+    @stream_with_context
+    def generate():
+        try:
+            yield "data: " + json.dumps({"type": "meta", "provider": config["provider"], "model": config["model"]}) + "\\n\\n"
+            with upstream:
+                for raw_line in upstream:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        yield "data: " + json.dumps({"type": "done"}) + "\\n\\n"
+                        return
+                    try:
+                        parsed = json.loads(data)
+                        choices = parsed.get("choices", [])
+                        delta = choices[0].get("delta", {}) if choices else {}
+                        token = delta.get("content") if isinstance(delta, dict) else None
+                        if isinstance(token, str) and token:
+                            yield "data: " + json.dumps({"type": "delta", "text": token}, ensure_ascii=False) + "\\n\\n"
+                        error = parsed.get("error")
+                        if error:
+                            yield "data: " + json.dumps({"type": "error", "message": "El proveedor interrumpió el streaming."}) + "\\n\\n"
+                            return
+                    except (ValueError, TypeError, IndexError):
+                        continue
+            yield "data: " + json.dumps({"type": "done"}) + "\\n\\n"
+        except (OSError, TimeoutError):
+            yield "data: " + json.dumps({"type": "error", "message": "Se perdió la conexión durante la respuesta."}) + "\\n\\n"
+        finally:
+            upstream.close()
+    return Response(generate(), mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/chat")
