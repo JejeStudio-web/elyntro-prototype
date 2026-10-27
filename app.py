@@ -1343,8 +1343,13 @@ def multimodal_analyze():
         if total_bytes > 650_000:
             return jsonify({"ok": False, "error": "El total de adjuntos supera 650 KB. Reduce su tamaño."}), 413
         if mime in {"image/png", "image/jpeg", "image/webp"}:
-            if not raw or len(raw) < 16:
-                return jsonify({"ok": False, "error": f"La imagen {name} está vacía o incompleta."}), 400
+            signatures = {
+                "image/png": raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n"),
+                "image/jpeg": raw.startswith(b"\\xff\\xd8\\xff"),
+                "image/webp": len(raw) >= 12 and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP",
+            }
+            if not signatures[mime]:
+                return jsonify({"ok": False, "error": f"El archivo {name} no coincide con el formato de imagen declarado."}), 415
             parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}", "detail": "auto"}})
             image_count += 1
         elif mime == "application/pdf":
