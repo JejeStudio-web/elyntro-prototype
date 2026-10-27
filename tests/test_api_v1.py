@@ -175,3 +175,51 @@ def test_v1_defaults_to_the_existing_groq_runtime(api_client, monkeypatch):
     assert response.status_code == 200
     assert response.get_json()["data"][0]["id"] == "openai/gpt-oss-20b"
     assert response.get_json()["data"][0]["owned_by"] == "groq"
+
+
+def test_v1_model_pool_lists_multiple_configured_models(api_client, monkeypatch):
+    monkeypatch.setenv("ELYNTRO_MODEL_POOL", json.dumps([
+        {"id": "fast", "provider": "groq", "model": "llama-3.3-70b-versatile",
+         "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "primary": True},
+        {"id": "reasoner", "provider": "openai", "model": "gpt-4.1-mini",
+         "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"},
+    ]))
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    response = api_client.get("/api/v1/models", headers=auth())
+    assert response.status_code == 200
+    models = response.get_json()["data"]
+    assert [model["id"] for model in models] == ["fast", "reasoner"]
+    assert models[0]["elyntro"]["primary"] is True
+    assert models[1]["owned_by"] == "openai"
+
+
+def test_v1_model_pool_routes_to_selected_upstream(api_client, monkeypatch):
+    import elyntro_api_v1 as module
+    monkeypatch.setenv("ELYNTRO_MODEL_POOL", json.dumps([
+        {"id": "fast", "provider": "groq", "model": "llama-3.3-70b-versatile",
+         "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "primary": True},
+        {"id": "reasoner", "provider": "openai", "model": "gpt-4.1-mini",
+         "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"},
+    ]))
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    seen = {}
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, limit):
+            return json.dumps({"model": "gpt-4.1-mini", "choices": [{"message": {"role": "assistant", "content": "ROUTED_OK"}, "finish_reason": "stop"}], "usage": {}}).encode()
+    def fake_urlopen(req, timeout):
+        seen["url"] = req.full_url
+        seen["auth"] = req.get_header("Authorization") or req.unredirected_hdrs.get("Authorization")
+        seen["model"] = json.loads(req.data)["model"]
+        return FakeResponse()
+    monkeypatch.setattr(module, "urlopen", fake_urlopen)
+    response = api_client.post("/api/v1/chat/completions", headers=auth(), json={
+        "model": "reasoner", "messages": [{"role": "user", "content": "test"}]
+    })
+    assert response.status_code == 200
+    assert response.get_json()["model"] == "reasoner"
+    assert response.get_json()["elyntro"]["provider"] == "openai"
+    assert seen == {"url": "https://api.openai.com/v1/chat/completions", "auth": "Bearer test-openai-key", "model": "gpt-4.1-mini"}
