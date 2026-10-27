@@ -13,7 +13,7 @@ Lists every configured model alias, its provider and supported capabilities. It 
 Accepts a bounded subset of the OpenAI Chat Completions request shape:
 - `messages`: hasta 20 mensajes con roles `system`, `user` o `assistant`; el contenido puede ser texto o partes de texto e imágenes base64 PNG/JPEG/WebP en mensajes de usuario.
 - `model`: optional `elyntro-auto`, `elyntro-default`, a public alias from `/models`, or its configured upstream model ID. Other IDs are rejected.
-- `max_tokens`: optional integer from 1 to 4096.
+- `max_tokens`: optional integer from 1 to 2048.
 - `temperature`: optional number from 0 to 2.
 - `response_format`: optional `{"type":"json_object"}`.
 - `stream`: `true` devuelve eventos Server-Sent Events (`text/event-stream`) del proveedor configurado; `false` devuelve JSON normal.
@@ -86,8 +86,7 @@ The versioned endpoints support a deployment-wide API key. Configure the secret
 as `ELYNTRO_API_KEY` in the hosting provider's environment settings; never commit
 it to the repository or send it to a browser application.
 
-When configured, the following endpoints require either
-`Authorization: Bearer YOUR_KEY` or `X-Elyntro-API-Key: YOUR_KEY`:
+The following endpoints require `Authorization: Bearer YOUR_KEY`:
 - `GET /api/v1/models`
 - `POST /api/v1/chat/completions`
 - `POST /api/v1/agent/execute`
