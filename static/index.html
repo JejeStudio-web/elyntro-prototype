@@ -467,15 +467,15 @@
           <form id="composer-form">
             <div class="composer">
               <div class="composer-tools">
-                <button class="attach-button" id="attach-file" type="button">＋ Adjuntar texto</button>
+                <button class="attach-button" id="attach-file" type="button">＋ Adjuntar archivos</button>
                 <button class="attach-button voice-button" id="voice-input" type="button" title="Dictado por voz si el navegador lo admite">Dictar</button>
                 <button class="attach-button" id="stop-request" type="button" hidden>Detener</button>
-                <input id="file-input" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden>
+                <input id="file-input" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" multiple hidden>
                 <span id="attachment" aria-live="polite"></span>
               </div>
               <textarea id="prompt" maxlength="10000" rows="2" placeholder="Escribe lo que necesitas…" aria-label="Tu petición" required></textarea>
               <div class="composer-bottom">
-                <span class="composer-note">Texto y archivos .txt/.md/.csv/.json · máximo 8 KB por archivo</span>
+                <span class="composer-note">Archivos de texto .txt/.md/.csv/.json · hasta 5 archivos, 8 KB en total</span>
                 <button class="send" id="send" type="submit">Ejecutar
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
                 </button>
@@ -1172,31 +1172,41 @@
 
     $("attach-file").addEventListener("click", () => $("file-input").click());
     $("file-input").addEventListener("change", async () => {
-      const file = $("file-input").files?.[0];
-      if (!file) return;
-      const allowed = /\.(txt|md|csv|json)$/i.test(file.name);
-      if (!allowed) { $("status").textContent = "Formato no admitido. Usa .txt, .md, .csv o .json."; $("file-input").value = ""; return; }
-      if (file.size > 8192) { $("status").textContent = "El archivo supera el límite de 8 KB."; $("file-input").value = ""; return; }
+      const files = Array.from($("file-input").files || []);
+      if (!files.length) return;
       try {
-        const content = await file.text();
-        if (content.includes("\u0000")) throw new Error("El archivo parece binario; adjunta un archivo de texto.");
-        attachedText = { name: file.name.replace(/[\\/]/g, "_").slice(0, 100), content };
-        const chip = element("span", "attachment-chip", `${attachedText.name} · ${file.size} B`);
+        if (files.length > 5) throw new Error("Puedes adjuntar hasta 5 archivos de texto por petición.");
+        const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+        if (totalBytes > 8192) throw new Error("Los archivos adjuntos superan el límite combinado de 8 KB.");
+        const parts = [];
+        for (const file of files) {
+          if (!/\.(txt|md|csv|json)$/i.test(file.name)) throw new Error(`Formato no admitido: ${file.name}. Usa .txt, .md, .csv o .json.`);
+          const content = await file.text();
+          if (content.includes("\u0000")) throw new Error(`${file.name} parece binario; solo se admiten archivos de texto.`);
+          const safeName = file.name.replace(/[\\/]/g, "_").slice(0, 100);
+          parts.push({ name: safeName, content });
+        }
+        attachedText = {
+          name: parts.map(part => part.name).join(", "),
+          content: parts.map(part => `--- Archivo: ${part.name} ---\n${part.content}\n--- Fin de ${part.name} ---`).join("\n\n"),
+        };
+        const chip = element("span", "attachment-chip", `${parts.length} archivo${parts.length === 1 ? "" : "s"} · ${totalBytes.toLocaleString()} B`);
+        const names = element("span", "", parts.map(part => part.name).join(", "));
         const remove = element("button", "", "×");
         remove.type = "button";
-        remove.setAttribute("aria-label", "Quitar archivo adjunto");
+        remove.setAttribute("aria-label", "Quitar archivos adjuntos");
         remove.addEventListener("click", () => {
           attachedText = null;
           $("attachment").replaceChildren();
           $("file-input").value = "";
         });
-        chip.append(remove);
+        chip.append(names, remove);
         $("attachment").replaceChildren(chip);
-        $("status").textContent = "Archivo leído en el navegador y listo para incluir en la petición.";
+        $("status").textContent = `${parts.length} archivo${parts.length === 1 ? "" : "s"} leído${parts.length === 1 ? "" : "s"} en el navegador y listo${parts.length === 1 ? "" : "s"} para la petición.`;
       } catch (error) {
         attachedText = null;
         $("attachment").replaceChildren();
-        $("status").textContent = error.message || "No se pudo leer el archivo.";
+        $("status").textContent = error.message || "No se pudieron leer los archivos.";
         $("file-input").value = "";
       }
     });
