@@ -354,7 +354,7 @@ def chat_completions():
             tool_names.add(name)
             tool_schemas.append(schema_by_name[name])
     tool_choice = payload.get("tool_choice", "auto")
-    if tool_choice not in {"auto", "none", "required"} and not (
+    if not (isinstance(tool_choice, str) and tool_choice in {"auto", "none", "required"}) and not (
         isinstance(tool_choice, dict) and tool_choice.get("type") == "function"
         and isinstance(tool_choice.get("function"), dict)
         and tool_choice["function"].get("name") in tool_names
