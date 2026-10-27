@@ -705,7 +705,7 @@
           method: "POST",
           headers: requestHeaders,
           credentials: "same-origin",
-          body: JSON.stringify({ goal: fullPrompt, history: requestHistory }),
+          body: JSON.stringify({ goal: fullPrompt, history: requestHistory, async: true }),
           signal: controller.signal,
         });
         let data = await responseJson(response);
