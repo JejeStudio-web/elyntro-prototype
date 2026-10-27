@@ -280,6 +280,7 @@
               <div class="composer-tools">
                 <button class="attach-button" id="attach-file" type="button">＋ Adjuntar texto</button>
                 <button class="attach-button voice-button" id="voice-input" type="button" title="Dictado por voz si el navegador lo admite">Dictar</button>
+                <button class="attach-button" id="stop-request" type="button" hidden>Detener</button>
                 <input id="file-input" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden>
                 <span id="attachment" aria-live="polite"></span>
               </div>
@@ -529,6 +530,7 @@
       busy = true;
       $("prompt").value = "";
       $("send").disabled = true;
+      $("stop-request").hidden = false;
       $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
       const requestHistory = history.slice(-10);
       addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo adjunto: ${attachedText.name}]` : ""));
@@ -608,6 +610,7 @@
         busy = false;
         activeController = null;
         $("send").disabled = false;
+        $("stop-request").hidden = true;
         $("prompt").focus();
       }
     }
@@ -627,6 +630,10 @@
       for (const label of ["Dame un plan de acción", "¿Qué puede salir mal?", "Resúmelo en 5 puntos"]) { const b = element("button", "followup-chip", label); b.type = "button"; b.addEventListener("click", () => submitPrompt(label + " usando como contexto esta pregunta y respuesta.\n\nPregunta: " + originalPrompt + "\n\nRespuesta:\n" + answer)); chips.append(b); }
       article.append(chips);
     }
+    $("stop-request").addEventListener("click", () => {
+      if (activeController) activeController.abort();
+      $("status").textContent = "Se ha solicitado detener la espera. El servidor podría seguir procesando la tarea.";
+    });
     $("search-chat").addEventListener("click", () => { const panel = $("search-panel"); panel.hidden = !panel.hidden; if (!panel.hidden) $("search-input").focus(); });
     $("search-input").addEventListener("input", () => {
       const q = $("search-input").value.trim().toLocaleLowerCase(), messages = [...conversation.querySelectorAll(".message")];
@@ -778,6 +785,12 @@
         $("model-label").textContent = "Proveedor sin comprobar";
       }
     }
+    try {
+      if (localStorage.getItem(THEME_KEY) === "light") {
+        document.body.classList.add("light");
+        $("theme-toggle").textContent = "Cambiar a oscuro";
+      }
+    } catch {}
     try {
       if (localStorage.getItem(THEME_KEY) === "light") {
         document.body.classList.add("light");
