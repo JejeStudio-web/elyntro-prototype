@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101421">
+  <meta name="theme-color" content="#10131c">
+  <meta name="description" content="Elyntro: un espacio de inteligencia para investigar, razonar, crear y ejecutar tareas con verificación transparente.">
   <title>Elyntro · Espacio de trabajo</title>
   <style>
     :root {
@@ -214,6 +215,7 @@
     .delivery-warning { padding:9px 11px; border:1px solid #8b7548; border-radius:10px; color:#e8d3a2; background:#8b754814; font-size:11px; }
     body.light .delivery-warning { color:#795c1f; background:#fff8e5; }
     .mobile-brand { display: none; }
+    .menu-toggle { display:none; }
     .top-actions { display: flex; align-items: center; gap: 8px; }
     .utility-button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: #ffffff08; color: var(--text); font-size: 11px; }
     .utility-button:hover { border-color: var(--accent-strong); background: #ffffff12; }
@@ -535,13 +537,32 @@
         }
         if (last < raw.length) parent.append(document.createTextNode(raw.slice(last)));
       };
-      for (const line of lines) {
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex];
         if (/^\x60\x60\x60/.test(line)) {
           if (codeLines) { codeNode._code.textContent = codeLines.join("\n"); container.append(codeNode); codeLines = null; codeNode = null; }
           else { codeLines = []; codeNode = element("pre"); const code = element("code"); codeNode.append(code); codeNode._code = code; }
           list = null; continue;
         }
         if (codeLines) { codeLines.push(line); codeNode._code.textContent = codeLines.join("\n"); continue; }
+        const separator = lines[lineIndex + 1] || "";
+        if (line.includes("|") && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separator)) {
+          const cells = (raw) => raw.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(value => value.trim());
+          const table = document.createElement("table");
+          const thead = document.createElement("thead");
+          const headerRow = document.createElement("tr");
+          for (const value of cells(line)) { const th = document.createElement("th"); inline(th, value); headerRow.append(th); }
+          thead.append(headerRow); table.append(thead);
+          const tbody = document.createElement("tbody");
+          lineIndex += 2;
+          while (lineIndex < lines.length && lines[lineIndex].includes("|") && lines[lineIndex].trim()) {
+            const row = document.createElement("tr");
+            for (const value of cells(lines[lineIndex])) { const td = document.createElement("td"); inline(td, value); row.append(td); }
+            tbody.append(row); lineIndex++;
+          }
+          lineIndex--;
+          table.append(tbody); container.append(table); list = null; continue;
+        }
         if (!line.trim()) { list = null; continue; }
         if (/^---+$/.test(line.trim())) { list = null; container.append(document.createElement("hr")); continue; }
         const h = line.match(/^(#{1,3})\s+(.+)$/);
@@ -797,7 +818,7 @@
       $("prompt").value = "";
       $("send").disabled = true;
       $("stop-request").hidden = false;
-      $("status").textContent = "Solicitud enviada; esperando respuesta del servidor. No hay progreso de etapas en tiempo real.";
+      $("status").textContent = "Solicitud enviada. Preparando ejecución y seguimiento del progreso…";
       const requestHistory = history.slice(-10);
       addMessage("user", "Petición", prompt + (attachedText ? `\n[Archivo adjunto: ${attachedText.name}]` : ""));
       // The attachment content is sent only in the current request; never persist it in local history.
@@ -1180,10 +1201,47 @@
     });
     document.querySelectorAll("[data-prompt]").forEach((button) => {
       button.addEventListener("click", () => {
+        if (button.closest(".nav")) {
+          document.querySelectorAll(".nav button").forEach(item => { item.classList.remove("active"); item.removeAttribute("aria-current"); });
+          button.classList.add("active"); button.setAttribute("aria-current", "page");
+          document.body.classList.remove("sidebar-open");
+          $("menu-toggle")?.setAttribute("aria-expanded", "false");
+        }
         $("prompt").value = button.dataset.prompt;
+        $("prompt").dispatchEvent(new Event("input", { bubbles: true }));
         $("prompt").focus();
       });
     });
+
+    $("menu-toggle")?.addEventListener("click", () => {
+      const open = document.body.classList.toggle("sidebar-open");
+      $("menu-toggle").setAttribute("aria-expanded", String(open));
+      $("menu-toggle").setAttribute("aria-label", open ? "Cerrar navegación" : "Abrir navegación");
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        document.body.classList.remove("sidebar-open");
+        $("menu-toggle")?.setAttribute("aria-expanded", "false");
+        if (!$("search-panel").hidden) { $("search-panel").hidden = true; $("search-input").value = ""; $("search-results").textContent = ""; }
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        $("search-panel").hidden = false;
+        $("search-input").focus();
+      }
+    });
+    $("prompt").addEventListener("input", () => {
+      const field = $("prompt");
+      field.style.height = "auto";
+      field.style.height = Math.min(field.scrollHeight, 220) + "px";
+    });
+    $("prompt").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        if (!busy) submitPrompt($("prompt").value);
+      }
+    });
+
 
     async function checkHealth() {
       const dot = $("health-dot");
