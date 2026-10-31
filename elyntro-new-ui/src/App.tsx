@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { Activity, ArrowDown, ArrowUpRight, Check, ChevronDown, CircleHelp, Command, FileText, Globe, LogOut, Menu, MessageSquare, Plus, Search, Send, Settings2, ShieldCheck, Sparkles, SquarePen, X } from "lucide-react";
+import { Activity, ArrowUpRight, Check, ChevronDown, CircleHelp, FileText, Globe, LogOut, Menu, MessageSquare, Search, Send, Settings2, ShieldCheck, Sparkles, SquarePen, X } from "lucide-react";
 import { getAccessToken, supabase, supabaseConfigured } from "./lib/supabase";
 import type { ChatMessage, Conversation } from "./types";
 
@@ -126,7 +126,7 @@ export default function App() {
       <div className="section-label">RECIENTES <span>{filtered.length}</span></div>
       <nav className="conversation-list">{filtered.map(c => <button key={c.id} className={"conversation-item " + (c.id === activeId ? "active" : "")} onClick={() => setActiveId(c.id)}><MessageSquare size={15} /><span>{c.title || "Nueva conversación"}</span></button>)}
       {filtered.length === 0 && <p className="empty-sidebar">{search ? "No hay coincidencias." : "Tus conversaciones aparecerán aquí."}</p>}</nav>
-      <div className="sidebar-bottom"><button className="side-link" onClick={() => setShowSettings(true)}><Settings2 size={17} />Configuración</button><button className="side-link" onClick={() => setNotice("La ayuda se incorporará en una siguiente iteración.")}><CircleHelp size={17} />Ayuda</button><div className="profile-row"><div className="avatar">{(session.user.email || "E").slice(0,1).toUpperCase()}</div><div className="profile-copy"><strong>{session.user.email?.split("@")[0]}</strong><span>Cuenta personal</span></div><button className="icon-button" aria-label="Cerrar sesión" onClick={() => supabase.auth.signOut()}><LogOut size={16} /></button></div></div>
+      <div className="sidebar-bottom"><button className="side-link" onClick={() => setShowSettings(true)}><Settings2 size={17} />Configuración</button><button className="side-link" onClick={() => setNotice("La ayuda se incorporará en una siguiente iteración.")}><CircleHelp size={17} />Ayuda</button><div className="profile-row"><div className="avatar">{(session.user.email || "E").slice(0,1).toUpperCase()}</div><div className="profile-copy"><strong>{session.user.email?.split("@")[0]}</strong><span>Cuenta personal</span></div><button className="icon-button" aria-label="Cerrar sesión" onClick={() => { void supabase?.auth.signOut(); }}><LogOut size={16} /></button></div></div>
     </aside>
     {!sidebarOpen && <button className="floating-menu icon-button" onClick={() => setSidebarOpen(true)} aria-label="Mostrar panel"><Menu size={19} /></button>}
     <main className="workspace"><header className="topbar"><div className="breadcrumbs"><span>Espacio de trabajo</span><ChevronDown size={14} /><strong>{active?.title || "Elyntro"}</strong></div><div className="topbar-right"><span className="secure-status"><ShieldCheck size={14} /> Sesión segura</span><button className="icon-button" onClick={() => setShowSettings(true)} aria-label="Configuración"><Settings2 size={17} /></button></div></header>
