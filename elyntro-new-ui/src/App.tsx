@@ -99,15 +99,18 @@ export default function App() {
         body: JSON.stringify({ conversation_id: activeId, message: content })
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || payload.message || "El servicio respondió con HTTP " + response.status);
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || "El servicio respondió con HTTP " + response.status);
       await loadMessages(activeId);
       await loadConversations();
-      if (payload.reply && supabase) {
+      if (typeof payload.response === "string" && supabase) {
         const { data } = await supabase.from("messages").select("id,conversation_id,role,content,created_at").eq("conversation_id", activeId).order("created_at", { ascending: true }).limit(200);
         if (data) setMessages(data as ChatMessage[]);
       }
     } catch (error) {
-      setMessages(current => current.filter(item => item.id !== optimistic.id));
+      // The API persists the user message before calling the model. Keep the UI in sync
+      // with the database after a provider failure instead of deleting a message that was saved.
+      if (supabase && activeId) await loadMessages(activeId);
+      else setMessages(current => current.filter(item => item.id !== optimistic.id));
       setNotice(error instanceof Error ? error.message : "No se pudo enviar el mensaje.");
     } finally { setBusy(false); }
   }
