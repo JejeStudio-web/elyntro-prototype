@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import { Activity, ArrowDown, ArrowUpRight, Check, ChevronDown, CircleHelp, Command, FileText, Globe, LogOut, Menu, MessageSquare, Plus, Search, Send, Settings2, ShieldCheck, Sparkles, SquarePen, X } from "lucide-react";
 import { getAccessToken, supabase, supabaseConfigured } from "./lib/supabase";
 import type { ChatMessage, Conversation } from "./types";
@@ -61,7 +62,7 @@ export default function App() {
     setMessages((data ?? []) as ChatMessage[]);
   }
 
-  async function authenticate(event: React.FormEvent) {
+  async function authenticate(event: FormEvent) {
     event.preventDefault();
     if (!supabase) return;
     setAuthBusy(true); setAuthError("");
