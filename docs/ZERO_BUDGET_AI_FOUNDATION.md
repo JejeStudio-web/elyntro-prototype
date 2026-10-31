@@ -16,7 +16,7 @@ Scope: isolated branch `work/zero-budget-ai-foundation`. This document does not 
 - The repo already contains a provider-independent model gateway, registry, router, evaluation store, benchmark runner, comparison runner and adaptive routing code under `elyntro-engine-v6.2.0/elyntro/`.
 - `elyntro_api_v1.py` already has a server-side model pool with a primary model and multiple OpenAI-compatible endpoints. Client requests cannot provide provider secrets.
 - The Flask app's direct model path uses provider environment configuration; the current codebase documents Groq as the existing provider route.
-- The frontend lives under `elyntro-new-ui/`. The separate operational chat currently uses n8n and Supabase. These are separate paths and must not be assumed to be connected end-to-end merely because each service is deployed.
+- The frontend lives under `elyntro-new-ui/`. The active n8n workflow `Elyntro — Operational Chat API v1` (workflow ID `x5QQXNZXF22NuOyv`, active version `6259a482-6f8c-40e8-baba-8d389a16c85b`) currently contains a LangChain Agent node connected to a Groq model (`openai/gpt-oss-120b`). The inspected active graph does **not** invoke the separately saved `Elyntro_agent`. The UI, n8n and Supabase being deployed does not itself prove the full flow works end-to-end. Keep this discrepancy explicit until a real authenticated test proves the route and response.
 - Existing benchmark modules are a better foundation than inventing another routing layer. First verify their tests and wire them to a repeatable benchmark set.
 - Existing deployment notes identify possible ephemeral SQLite storage and a PostgreSQL expiry date. Persistence risks must be addressed before relying on evaluation or user memory as durable.
 
