@@ -123,3 +123,20 @@ No model becomes primary unless:
 ## What success means
 
 Elyntro will not be declared "the world's best AI" by assertion. The engineering target is a system that steadily improves on a public, reproducible task suite, is unusually capable at completing real tasks, verifies outcomes, protects user data and is honest about limitations—while respecting the €0 inference-spend constraint.
+
+## Verified execution update — 2026-11-05
+
+Scope: read-only inspection of connected GitHub, n8n, and Vercel metadata. No model request was issued during this inspection; no provider credits were intentionally consumed. No production workflow, deployment, secret, permission, or user data was changed.
+
+### Confirmed current state
+
+- GitHub branch `work/zero-budget-ai-foundation` contains the foundation plan; this update is isolated on `work/daily-verification-2026-11-05`.
+- n8n still exposes 11 workflows. `Elyntro — Operational Chat API v1` (`x5QQXNZXF22NuOyv`) is active and its inspected graph connects `Elyntro AI response` to `Groq model` using `openai/gpt-oss-120b`; it does not invoke the separately saved `Elyntro_agent`.
+- The isolated `Elyntro — Saved Agent Connection Test` (`uaBNf9XvrfZnz10V`) remains inactive and references the saved agent by ID. It was not executed.
+- Vercel project `elyntro-new-ui` and recent deployments are visible. Recent preview deployment `dpl_BiSw4MAsDJb3PVAUjCsaXiN2VRP5` is READY on `feature/new-elyntro-ui`; this is deployment metadata, not proof that the current frontend successfully reaches n8n.
+- The latest retrievable operational workflow execution (ID `37`, 2026-10-31) is listed as `success` at the execution level, but its node data shows the AI node failed with provider rate-limit/too-many-requests errors and flowed to `Return controlled provider error`. The stored response metadata also contains a claimed `sandbox:/Capacidades_Elyntro.pdf` link without a verifiable artifact in this execution. This is evidence of a user-facing failure/false artifact claim, not a successful chat completion.
+- The active workflow has retry behavior on the AI node and the inspected execution recorded many model sub-runs before the provider error. Under the €0 constraint, do not re-run live model calls just to reproduce this failure; inspect and test deterministic error-handling logic with simulated/pinned data first.
+
+### Decision and next action
+
+Do not switch the active workflow to `Elyntro_agent` until its saved-agent connection can be tested without a paid or billable model path. Do not use Groq or any other inference route unless its zero-cost eligibility is verified for the account at execution time. The highest-value next isolated engineering task is to add deterministic tests for frontend/backend provider-error handling and artifact-link validation, then inspect the relevant frontend request path and ensure errors are shown as errors rather than rendered as successful assistant output. Production remains unchanged.
