@@ -43,3 +43,17 @@ The inspected historical chat response asserted that a PDF was available through
 ## Next safe action
 
 Inspect n8n execution retention/redaction controls without changing them, then create a non-sensitive isolated test that checks whether authorization headers and conversation content are persisted. Separately add an automated response-contract test for artifact claims. Keep the active production workflow and saved `Elyntro_agent` unchanged until the isolated tests pass and the change is reviewed.
+
+## Follow-up verification — 2026-11-09
+
+Read-only verification was repeated against the connected n8n instance.
+
+- The workflow `Elyntro — Operational Chat API v1` remains active (workflow ID `x5QQXNZXF22NuOyv`). Its current graph still extracts the bearer token into the `token` field in `Normalize request`, then later nodes reference that field for Supabase requests. This keeps the token in upstream execution data unless execution-data redaction/retention prevents it.
+- The workflow execution metadata for both the isolated chat-validation suite and orchestration suite reports `redaction.production=false` and `redaction.manual=false`. This is evidence about those recorded executions; it does not by itself reveal every instance-wide retention setting.
+- Isolated execution `42` of `Elyntro — Chat Validation Sandbox` completed successfully: 6/6 pure validation cases passed.
+- Isolated execution `43` of `Elyntro — Orchestration & Policy Test Suite` completed successfully: 10/10 deterministic simulation cases passed. The suite's own output states that no external calls, credentials, or production data were used.
+- The GitHub repository is accessible again through the connected API, and the existing review branch is present. Repository metadata reports default branch `main`; no production code or workflow was changed during this follow-up.
+
+### Updated assessment
+
+The security finding remains open. The tests above validate deterministic simulation logic only; they do not demonstrate JWT verification, Supabase row-level security, provider availability, or real execution-data redaction. Next safe action: test the least-data approach in an inactive isolated workflow using a synthetic bearer token, then inspect saved execution data to confirm the token and message body are absent. Do not alter production settings or rotate credentials until the effect and current credential exposure are established.
