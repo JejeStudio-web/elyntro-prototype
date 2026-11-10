@@ -57,3 +57,18 @@ Read-only verification was repeated against the connected n8n instance.
 ### Updated assessment
 
 The security finding remains open. The tests above validate deterministic simulation logic only; they do not demonstrate JWT verification, Supabase row-level security, provider availability, or real execution-data redaction. Next safe action: test the least-data approach in an inactive isolated workflow using a synthetic bearer token, then inspect saved execution data to confirm the token and message body are absent. Do not alter production settings or rotate credentials until the effect and current credential exposure are established.
+
+
+## Follow-up verification — 2026-11-10
+
+A new read-only inspection and isolated test run was completed through the connected n8n tools.
+
+- Confirmed again that `Elyntro — Operational Chat API v1` is active and its draft matches the active version. The `Normalize request` node extracts the bearer token into a named `token` field, and downstream HTTP Request nodes reference that value for Supabase authentication.
+- Confirmed that the saved `Elyntro_agent` remains published as a separate agent. The operational chat workflow graph inspected in this run still uses its own LangChain Agent node and Groq model; it does not contain a Message an Agent node connected to `Elyntro_agent`.
+- Re-ran the deterministic suites in isolation. Execution `44`, `Elyntro — Orchestration & Policy Test Suite`, returned `success` and its aggregate output reported 10/10 cases passed, 0 failed. Its output explicitly records no external calls, no credentials used, and no production data touched.
+- Execution `45`, `Elyntro — Chat Validation Sandbox`, returned `success`; its output reported 6/6 validation cases passed and explicitly describes them as pure simulations without token verification, network calls, database writes, or external service calls.
+- The runtime metadata for both test executions reports `redaction.production=false` and `redaction.manual=false`. This is a confirmed configuration signal in these execution records, but it does not alone establish the full instance-wide retention policy or who can access past executions.
+
+### Status and next action
+
+No workflow, credential, permission, production setting, or historical execution was modified or deleted. The security finding remains open; the passing suites do not test actual secret redaction or authentication. The next safe step is to inspect the available redaction/retention controls and test their behavior with synthetic data in an inactive isolated workflow before considering any production change. The artifact-claim regression test is also still pending.
