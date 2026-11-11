@@ -72,3 +72,32 @@ A new read-only inspection and isolated test run was completed through the conne
 ### Status and next action
 
 No workflow, credential, permission, production setting, or historical execution was modified or deleted. The security finding remains open; the passing suites do not test actual secret redaction or authentication. The next safe step is to inspect the available redaction/retention controls and test their behavior with synthetic data in an inactive isolated workflow before considering any production change. The artifact-claim regression test is also still pending.
+
+
+## Follow-up verification — 2026-11-11
+
+The repository and existing security-review branch are accessible again through the connected GitHub API. Repository metadata confirms `JejeStudio-web/elyntro-prototype` is not archived and the default branch is `main`.
+
+### Isolated retention change
+
+Updated only the inactive workflow `Elyntro — Chat Validation Sandbox` (ID `UN5Lds4OrheBV8b2`) to minimize stored execution data:
+
+- `saveManualExecutions=false`
+- `saveDataSuccessExecution=none`
+- `saveDataErrorExecution=none`
+
+n8n returned `appliedOperations=1`, the resulting settings matched these values, and no validation warnings were reported. This is an isolated configuration change; the active operational workflow, credentials, permissions, and production settings were not changed.
+
+### Execution blocker
+
+Attempted a manual run of the inactive sandbox after the change. n8n returned: `Your trial has ended`. No execution ID was created, so the test did not run. This is a concrete platform access/billing blocker; no upgrade or payment was attempted. The changed sandbox settings are saved, but their effect on actual execution persistence could not be runtime-verified.
+
+### Status and next action
+
+- Confirmed: GitHub repository and existing review branch are accessible.
+- Confirmed: isolated sandbox execution-retention settings were saved successfully.
+- Blocked: n8n cannot execute workflows because the trial has ended.
+- Still open: historical operational execution data may contain bearer tokens and conversation content; current validity/access scope is unknown.
+- Not done: no production workflow/instance settings changed, no credentials rotated, no historical data deleted, no deployment performed.
+
+Next safe action: do not pay or enable a trial. Preserve the current evidence, check whether the user has an already-available no-cost local n8n/runtime option, and continue code-level regression work in the repository. Production remediation remains blocked until a safe test environment is available.
