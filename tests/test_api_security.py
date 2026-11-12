@@ -55,3 +55,20 @@ def test_api_rejects_oversized_request_body():
         content_type="text/plain",
     )
     assert response.status_code == 413
+
+
+def test_missing_artifact_is_never_reported_as_created():
+    """A task capability token must not make a nonexistent artifact appear available."""
+    client = app_module.app.test_client()
+    created = client.post("/api/execute", json={"goal": "Crea una página web para una prueba"})
+    assert created.status_code == 201, created.get_json()
+    body = created.get_json()
+    task_id = body["task"]["task_id"]
+    token = body["task_access_token"]
+
+    missing = client.get(
+        f"/api/tasks/{task_id}/artifacts/nonexistent-proof.pdf",
+        headers={"X-Elyntro-Task-Token": token},
+    )
+    assert missing.status_code == 404
+    assert "<html" not in missing.get_data(as_text=True).casefold()
