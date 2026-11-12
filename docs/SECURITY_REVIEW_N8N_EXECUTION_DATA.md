@@ -101,3 +101,18 @@ Attempted a manual run of the inactive sandbox after the change. n8n returned: `
 - Not done: no production workflow/instance settings changed, no credentials rotated, no historical data deleted, no deployment performed.
 
 Next safe action: do not pay or enable a trial. Preserve the current evidence, check whether the user has an already-available no-cost local n8n/runtime option, and continue code-level regression work in the repository. Production remediation remains blocked until a safe test environment is available.
+
+
+## Follow-up — 2026-11-12: artifact availability regression guard
+
+The current repository default branch contains an existing authenticated artifact route and security tests for task-scoped access. Added an isolated regression test on this review branch:
+
+- `tests/test_api_security.py::test_missing_artifact_is_never_reported_as_created`.
+- The test creates a deterministic HTML task, then requests a deliberately nonexistent PDF artifact using that task's capability token.
+- Acceptance criteria: the missing artifact route returns HTTP 404 and does not return HTML content.
+
+Commit: `c806b092eff280dc01fa7a0ffc931a45924cefaa`.
+
+The file was read back from the review branch and the new test definition was confirmed present. The test has **not** been executed: the available GitHub connector can read/write repository contents but has not provided a code execution environment, and the n8n cloud trial is expired. This is a committed regression guard, not a passing test result. Before merge, run `python -m pytest -q tests/test_api_security.py` in a zero-cost local environment and fix any mismatch with the actual route behavior.
+
+The n8n execution-retention issue remains open. The sandbox retention settings recorded on 2026-11-11 are saved but not runtime-verified; no production settings or historical executions were changed.
