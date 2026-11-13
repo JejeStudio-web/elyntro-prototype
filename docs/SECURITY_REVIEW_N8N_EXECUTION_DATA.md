@@ -116,3 +116,20 @@ Commit: `c806b092eff280dc01fa7a0ffc931a45924cefaa`.
 The file was read back from the review branch and the new test definition was confirmed present. The test has **not** been executed: the available GitHub connector can read/write repository contents but has not provided a code execution environment, and the n8n cloud trial is expired. This is a committed regression guard, not a passing test result. Before merge, run `python -m pytest -q tests/test_api_security.py` in a zero-cost local environment and fix any mismatch with the actual route behavior.
 
 The n8n execution-retention issue remains open. The sandbox retention settings recorded on 2026-11-11 are saved but not runtime-verified; no production settings or historical executions were changed.
+
+
+## Follow-up — 2026-11-13: regression-test execution path checked
+
+Read-only checks against the current review branch established:
+
+- The repository already has `.github/workflows/tests.yml`; it runs `python -m pytest -q` as part of a larger test job, followed by Playwright browser checks and a browser-worker image build.
+- Its push trigger includes `main`, `feature/**`, `feat/**`, and `phase-1/**`, but not `work/**`. It also runs on pull requests and manual dispatch.
+- The security review branch is `work/security-review-execution-logs-2026-11-06`. The GitHub connector reports no workflow runs associated with regression-test commit `c806b092eff280dc01fa7a0ffc931a45924cefaa`.
+- The commit has a successful Vercel status/check, but the check-run details identify it as `Vercel Preview Comments` with “No unresolved feedback”; this is not evidence that pytest or the application security test passed.
+- `tests/test_api_security.py` was read back from the branch and contains `test_missing_artifact_is_never_reported_as_created`. No code execution environment is available through the current repository connector, and n8n Cloud previously reported its trial had ended.
+
+No workflow configuration was changed and no CI run, preview deployment, production deployment, or external model call was triggered. Do not infer that the new test passes from a successful Vercel check.
+
+### Next safe action
+
+Run `python -m pytest -q tests/test_api_security.py` in an existing local zero-cost environment. If no local environment is available, decide whether to enable a narrowly scoped test run on this work branch or open a review pull request; first confirm that the repository's CI usage is within the zero-cost constraint. Keep the n8n production workflow and credentials unchanged.
