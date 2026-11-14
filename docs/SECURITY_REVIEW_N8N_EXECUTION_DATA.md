@@ -133,3 +133,19 @@ No workflow configuration was changed and no CI run, preview deployment, product
 ### Next safe action
 
 Run `python -m pytest -q tests/test_api_security.py` in an existing local zero-cost environment. If no local environment is available, decide whether to enable a narrowly scoped test run on this work branch or open a review pull request; first confirm that the repository's CI usage is within the zero-cost constraint. Keep the n8n production workflow and credentials unchanged.
+
+
+## Follow-up — 2026-11-14: repository and CI evidence rechecked
+
+Read-only checks through the connected GitHub API now succeed. Repository metadata reports the repository is public, not archived, and the connected identity has push permission. This supersedes the earlier temporary access failure; it does not prove that every local checkout is synchronized.
+
+- Read back `tests/test_api_security.py` from the review branch. The regression test `test_missing_artifact_is_never_reported_as_created` is present and asserts that a nonexistent artifact returns HTTP 404 rather than HTML.
+- Read back `.github/workflows/tests.yml`. The push trigger still lists `main`, `feature/**`, `feat/**`, and `phase-1/**`; it does not list `work/**`. Pull requests and manual dispatch are configured separately.
+- Queried the commit status and check-runs for `c806b092eff280dc01fa7a0ffc931a45924cefaa`. The only returned check is Vercel's `Vercel Preview Comments`, which reports “No unresolved feedback.” It is not a pytest result. No test workflow run or pytest pass is established by this evidence.
+- Inspected the test dependency lock: it pins pytest and the project's local engine package. The GitHub connector can read repository files but does not execute Python code, so the regression test remains unexecuted in this run.
+
+No code, workflow configuration, credentials, production settings, or deployment was changed. No paid service or model was invoked.
+
+### Next action
+
+Use the existing local development environment to run `python -m pytest -q tests/test_api_security.py`, inspect any failures, and record the actual output. If that environment is unavailable, do not infer success from Vercel status and do not enable CI or preview deployments until the zero-cost implications are confirmed. Keep the n8n execution-data exposure finding open; its sandbox retention configuration was saved previously but never runtime-verified because the n8n trial had expired.
