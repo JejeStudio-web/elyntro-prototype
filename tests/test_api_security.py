@@ -57,7 +57,7 @@ def test_api_rejects_oversized_request_body():
     assert response.status_code == 413
 
 
-def test_missing_artifact_is_never_reported_as_created():
+def test_missing_artifact_route_returns_404():
     """A task capability token must not make a nonexistent artifact appear available."""
     client = app_module.app.test_client()
     created = client.post("/api/execute", json={"goal": "Crea una página web para una prueba"})
@@ -65,6 +65,8 @@ def test_missing_artifact_is_never_reported_as_created():
     body = created.get_json()
     task_id = body["task"]["task_id"]
     token = body["task_access_token"]
+    artifact_names = {item.get("name") for item in body["task"].get("artifacts", [])}
+    assert "nonexistent-proof.pdf" not in artifact_names
 
     missing = client.get(
         f"/api/tasks/{task_id}/artifacts/nonexistent-proof.pdf",
