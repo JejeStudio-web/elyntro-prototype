@@ -149,3 +149,22 @@ No code, workflow configuration, credentials, production settings, or deployment
 ### Next action
 
 Use the existing local development environment to run `python -m pytest -q tests/test_api_security.py`, inspect any failures, and record the actual output. If that environment is unavailable, do not infer success from Vercel status and do not enable CI or preview deployments until the zero-cost implications are confirmed. Keep the n8n execution-data exposure finding open; its sandbox retention configuration was saved previously but never runtime-verified because the n8n trial had expired.
+
+
+## Follow-up — 2026-11-15: regression assertion tightened
+
+Read-only review of the existing test showed that its name overstated what it asserted: it verified the missing-artifact URL returned HTTP 404, but did not directly assert that the task's advertised artifact list excluded the nonexistent filename.
+
+Updated `tests/test_api_security.py` on the review branch:
+
+- Renamed the case to `test_missing_artifact_route_returns_404`, matching its scope.
+- Added an assertion that `nonexistent-proof.pdf` is not present in the task's returned artifact names before requesting that URL.
+- Kept the existing HTTP 404 and non-HTML response assertions.
+
+Commit: `153d0eefa48f15b2caa7c052e9418b4bb1bea12d`.
+
+The file was read back from GitHub after the update. Attempted to clone the branch into a temporary local directory to execute pytest, but the execution environment could not resolve `github.com` (DNS/network unavailable). Therefore this test remains **unexecuted**, not passing. No CI run, deployment, paid service, model call, production change, or n8n change was made.
+
+### Next action
+
+Run `python -m pytest -q tests/test_api_security.py` in the already available local Elyntro development environment, then record the actual output. Keep the n8n execution-data exposure finding open; the saved sandbox retention settings have not been runtime-verified because n8n Cloud trial execution was blocked.
