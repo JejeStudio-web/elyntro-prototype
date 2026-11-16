@@ -168,3 +168,20 @@ The file was read back from GitHub after the update. Attempted to clone the bran
 ### Next action
 
 Run `python -m pytest -q tests/test_api_security.py` in the already available local Elyntro development environment, then record the actual output. Keep the n8n execution-data exposure finding open; the saved sandbox retention settings have not been runtime-verified because n8n Cloud trial execution was blocked.
+
+
+## Follow-up — 2026-11-16: enable test workflow on work branches
+
+Read back `.github/workflows/tests.yml` and confirmed the existing push trigger did not include `work/**`, so commits to this security review branch would not start the repository's test workflow automatically.
+
+Updated the push branch filter to include `"work/**"` while preserving the existing branches, pull-request trigger, manual dispatch, and all existing test/build steps.
+
+Commit: `8a27a2460e09ff301f4d973b545b0ce2b55437ad`.
+
+Post-write readback confirms the new branch pattern is saved. The commit status did not establish a GitHub Actions test result; the workflow-runs lookup returned no runs (that connector endpoint filters to pull-request-triggered runs). A Vercel preview deployment started automatically for this commit despite no deployment being requested. It was immediately canceled while still building; its final state was `CANCELED`, and it was not a production deployment.
+
+The test suite has **not** been proven to pass. The change makes future pushes to `work/**` eligible to trigger CI, but a successful run still needs to be observed. No production deployment, n8n workflow change, credential change, or paid model/service call was made.
+
+### Next action
+
+Verify whether GitHub Actions starts for the branch commit and inspect the actual job results. If no run starts, use a safe existing test environment to run `python -m pytest -q tests/test_api_security.py`. Keep the n8n execution-data exposure finding open until a real retention/redaction test is possible.
