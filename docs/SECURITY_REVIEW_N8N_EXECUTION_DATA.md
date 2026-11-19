@@ -185,3 +185,20 @@ The test suite has **not** been proven to pass. The change makes future pushes t
 ### Next action
 
 Verify whether GitHub Actions starts for the branch commit and inspect the actual job results. If no run starts, use a safe existing test environment to run `python -m pytest -q tests/test_api_security.py`. Keep the n8n execution-data exposure finding open until a real retention/redaction test is possible.
+
+
+## Follow-up — 2026-11-19: fresh repository verification
+
+Read-only checks through the connected GitHub API succeeded for this review branch.
+
+- The branch `work/security-review-execution-logs-2026-11-06` still exists.
+- Read back `.github/workflows/tests.yml`: the push trigger includes `"work/**"`, and the existing Python, frontend syntax, Playwright, and browser-worker build steps remain present.
+- Read back `tests/test_api_security.py`: `test_missing_artifact_route_returns_404` is present. It checks that the nonexistent PDF is absent from the advertised artifact list, then expects HTTP 404 and a non-HTML response.
+- Queried commit statuses for historical commits `4dba0595854ba35723d74ab91dbbb5161f1e919d`, `153d0eefa48f15b2caa7c052e9418b4bb1bea12d`, and `8a27a2460e09ff301f4d973b545b0ce2b55437ad`. The returned status is Vercel only (success for the test-file commit, failure for the two other queried commits); none of those status responses proves that GitHub Actions/pytest passed. These are historical commit statuses, not a claim about the branch's current head.
+- Attempted read-only searches against the connected n8n instance for the operational workflow, saved agent, sandbox, and recent execution metadata. The connector failed internally before returning results; therefore current n8n availability and execution state remain unknown in this run.
+
+No workflow, credential, permission, production setting, repository code, or deployment was changed. No paid service or model was invoked.
+
+### Next action
+
+Obtain an actual GitHub Actions run result for the current review-branch head, or execute `python -m pytest -q tests/test_api_security.py` in the existing zero-cost local environment. Separately retry read-only n8n inspection when the connector is healthy. Keep the execution-data exposure finding open; neither the repository checks nor the prior isolated retention settings prove that sensitive execution data is no longer stored.
