@@ -44,7 +44,7 @@ The existing engine package requires Python >=3.10; the recorded Mac system Pyth
 ## Current limitations
 
 - The local adapter is now implemented and unit tests have been added, but CI has not yet been run against this change at the time of writing.
-- The adapter is not yet wired into the main Flask chat/task routes.
+- The Flask runtime now accepts `ELYNTRO_MODEL_PROVIDER=llama.cpp` (or `llama-cpp`) and uses the existing server-side OpenAI-compatible request path. Set `ELYNTRO_LLAMA_CPP_MODEL` to the model alias exposed by the running server; the default endpoint is `http://127.0.0.1:8080/v1`. No paid provider fallback is performed.
 - No LoRA/QLoRA adapter has been trained.
 - The Qwen2.5-3B license and distribution terms remain a gate.
 - The Mac runtime, latency, and actual RAM use must be measured again.
