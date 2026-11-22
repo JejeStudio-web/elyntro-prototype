@@ -192,3 +192,59 @@ def test_versioned_api_stays_closed_when_key_is_unset(monkeypatch):
     assert response.status_code == 503
     assert response.get_json()["error"]["code"] == "api_not_configured"
 
+
+
+def test_llama_cpp_provider_uses_local_server_without_paid_api_key(monkeypatch):
+    import app as mod
+
+    monkeypatch.setenv("ELYNTRO_MODEL_PROVIDER", "llama.cpp")
+    monkeypatch.setenv("ELYNTRO_LLAMA_CPP_BASE_URL", "http://127.0.0.1:8080/v1")
+    monkeypatch.setenv("ELYNTRO_LLAMA_CPP_MODEL", "qwen-local")
+    monkeypatch.delenv("ELYNTRO_LLAMA_CPP_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("ELYNTRO_MODEL_POOL", raising=False)
+    observed = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "id": "llama-local-response",
+                "model": "qwen-local",
+                "choices": [{"message": {"content": "Respuesta del modelo local"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 4, "total_tokens": 9},
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        observed["url"] = request.full_url
+        observed["authorization"] = request.get_header("Authorization")
+        observed["body"] = json.loads(request.data.decode("utf-8"))
+        observed["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    result = mod._groq_messages([{"role": "user", "content": "test"}])
+
+    assert result["text"] == "Respuesta del modelo local"
+    assert result["provider"] == "llama.cpp"
+    assert observed["url"] == "http://127.0.0.1:8080/v1/chat/completions"
+    assert observed["authorization"] is None
+    assert observed["body"]["model"] == "qwen-local"
+    assert observed["timeout"] == 55
+
+
+def test_llama_cpp_provider_requires_model_name(monkeypatch):
+    import app as mod
+
+    monkeypatch.setenv("ELYNTRO_MODEL_PROVIDER", "llama.cpp")
+    monkeypatch.delenv("ELYNTRO_LLAMA_CPP_MODEL", raising=False)
+    monkeypatch.delenv("ELYNTRO_MODEL", raising=False)
+    monkeypatch.delenv("ELYNTRO_MODEL_POOL", raising=False)
+    config = mod._model_provider_config()
+    assert config["configured"] is False
+    assert config["provider"] == "llama.cpp"
