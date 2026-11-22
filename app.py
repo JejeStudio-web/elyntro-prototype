@@ -475,6 +475,18 @@ def _model_provider_config():
             "model": os.environ.get("ELYNTRO_MODEL", os.environ.get("OLLAMA_MODEL", "")).strip(),
             "requires_key": False,
         },
+        "llama.cpp": {
+            "base_url": os.environ.get("ELYNTRO_LLAMA_CPP_BASE_URL", "http://127.0.0.1:8080/v1").strip(),
+            "api_key_env": "ELYNTRO_LLAMA_CPP_API_KEY",
+            "model": os.environ.get("ELYNTRO_LLAMA_CPP_MODEL", os.environ.get("ELYNTRO_MODEL", "")).strip(),
+            "requires_key": False,
+        },
+        "llama-cpp": {
+            "base_url": os.environ.get("ELYNTRO_LLAMA_CPP_BASE_URL", "http://127.0.0.1:8080/v1").strip(),
+            "api_key_env": "ELYNTRO_LLAMA_CPP_API_KEY",
+            "model": os.environ.get("ELYNTRO_LLAMA_CPP_MODEL", os.environ.get("ELYNTRO_MODEL", "")).strip(),
+            "requires_key": False,
+        },
         "openai-compatible": {
             "base_url": os.environ.get("ELYNTRO_MODEL_BASE_URL", "").strip(),
             "api_key_env": "ELYNTRO_MODEL_API_KEY",
