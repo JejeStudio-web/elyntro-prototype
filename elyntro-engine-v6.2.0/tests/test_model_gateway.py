@@ -68,5 +68,48 @@ class ModelGatewayTests(unittest.TestCase):
                 adapter.complete("model", [{"role": "user", "content": "hi"}], 20, 1)
 
 
+    def test_local_llama_cpp_adapter_uses_local_endpoint_without_api_key(self):
+        import json
+        from elyntro.model_gateway import LocalLlamaCppAdapter
+        captured = {}
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self):
+                return json.dumps({"choices":[{"message":{"content":"local answer"}}],"usage":{"prompt_tokens":4,"completion_tokens":3}}).encode()
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["auth"] = request.get_header("Authorization")
+            captured["body"] = json.loads(request.data.decode())
+            captured["timeout"] = timeout
+            return Response()
+        adapter = LocalLlamaCppAdapter(timeout_seconds=20)
+        with patch("elyntro.model_gateway.urlopen", side_effect=fake_urlopen):
+            result = adapter.complete("qwen-local", [{"role":"user","content":"hi"}], 32, 7)
+        self.assertEqual(result, ("local answer", 4, 3))
+        self.assertEqual(captured["url"], "http://127.0.0.1:8080/v1/chat/completions")
+        self.assertIsNone(captured["auth"])
+        self.assertEqual(captured["body"]["model"], "qwen-local")
+        self.assertFalse(captured["body"]["stream"])
+        self.assertEqual(captured["timeout"], 7)
+
+    def test_local_llama_cpp_adapter_rejects_bad_endpoint(self):
+        from elyntro.model_gateway import LocalLlamaCppAdapter
+        for endpoint in ("bad-url", "ftp://127.0.0.1/v1", "http://user:pass@127.0.0.1/v1"):
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaises(ValueError):
+                    LocalLlamaCppAdapter(base_url=endpoint)
+
+    def test_local_llama_cpp_adapter_hides_http_error_body(self):
+        from io import BytesIO
+        from urllib.error import HTTPError
+        from elyntro.model_gateway import LocalLlamaCppAdapter
+        error = HTTPError("http://127.0.0.1:8080/v1/chat/completions", 500, "bad", {}, BytesIO(b"private response body"))
+        with patch("elyntro.model_gateway.urlopen", side_effect=error):
+            with self.assertRaises(ModelCallError) as caught:
+                LocalLlamaCppAdapter().complete("local", [{"role":"user","content":"hi"}], 20, 1)
+        self.assertIn("HTTP 500", str(caught.exception))
+        self.assertNotIn("private response body", str(caught.exception))
+
 if __name__ == "__main__":
     unittest.main()
