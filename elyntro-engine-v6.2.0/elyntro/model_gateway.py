@@ -133,6 +133,90 @@ class OpenAICompatibleAdapter:
         return text, input_tokens, output_tokens
 
 
+class LocalLlamaCppAdapter:
+    """Adapter for a local llama.cpp OpenAI-compatible server.
+
+    Defaults to http://127.0.0.1:8080/v1 and sends no API key. An optional
+    environment variable can be configured when the server is protected.
+    The endpoint is server configuration, never taken from user messages.
+    """
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        *,
+        api_key_env: str | None = None,
+        timeout_seconds: float = 120.0,
+    ) -> None:
+        from urllib.parse import urlsplit
+
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        endpoint = (base_url or os.getenv("ELYNTRO_LLAMA_CPP_BASE_URL")
+                    or "http://127.0.0.1:8080/v1").rstrip("/")
+        parsed = urlsplit(endpoint)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Local model endpoint must be an absolute HTTP(S) URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("Local model endpoint must not contain credentials, query, or fragment")
+        self.base_url = endpoint
+        self.api_key_env = api_key_env
+        self.timeout_seconds = timeout_seconds
+
+    def complete(self, model_id, messages, max_output_tokens, timeout_seconds):
+        api_key = None
+        if self.api_key_env:
+            api_key = os.getenv(self.api_key_env)
+            if not api_key:
+                raise ModelCallError(
+                    f"Missing API key in environment variable {self.api_key_env}"
+                )
+        payload = json.dumps({
+            "model": model_id,
+            "messages": list(messages),
+            "max_tokens": max_output_tokens,
+            "stream": False,
+        }).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        req = Request(
+            self.base_url + "/chat/completions",
+            data=payload,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urlopen(req, timeout=min(self.timeout_seconds, timeout_seconds)) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise ModelCallError(f"Local model server returned HTTP {exc.code}") from None
+        except (URLError, TimeoutError) as exc:
+            raise ModelCallError(f"Local model request failed: {type(exc).__name__}") from None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ModelCallError("Local model server returned invalid JSON") from None
+        try:
+            message_content = data["choices"][0]["message"]["content"]
+            usage = data.get("usage", {})
+            input_tokens = int(usage.get("prompt_tokens", 0))
+            output_tokens = int(usage.get("completion_tokens", 0))
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise ModelCallError("Local model response has an unexpected shape") from None
+        if isinstance(message_content, str):
+            text = message_content
+        elif isinstance(message_content, list):
+            # Some OpenAI-compatible servers return text as content blocks.
+            text = "".join(
+                part.get("text", "") for part in message_content
+                if isinstance(part, dict) and isinstance(part.get("text", ""), str)
+            )
+        else:
+            raise ModelCallError("Local model response contains invalid message content")
+        if not text.strip() or input_tokens < 0 or output_tokens < 0:
+            raise ModelCallError("Local model response contains invalid values")
+        return text, input_tokens, output_tokens
+
+
 class ModelGateway:
     def __init__(self, router: ModelRouter, adapters: Mapping[str, ProviderAdapter], timeout_seconds: float = 45.0):
         if timeout_seconds <= 0:
