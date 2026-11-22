@@ -31,7 +31,7 @@ from .model_registry import ModelProfile, ModelRegistry
 from .model_evaluation import EvaluationResult, EvaluationStore, estimate_cost, summarize
 from .model_router import ModelRouter, RoutingRequest, RoutingDecision
 
-from .model_gateway import (ModelCallError, ModelCallRequest, ModelCallResponse, ModelGateway, OpenAICompatibleAdapter)
+from .model_gateway import (ModelCallError, ModelCallRequest, ModelCallResponse, ModelGateway, OpenAICompatibleAdapter, LocalLlamaCppAdapter)
 
 from .verifier import EvidenceVerifier, VerificationReport, VerificationStatus, CriterionCheck
 
